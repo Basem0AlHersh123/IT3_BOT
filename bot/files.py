@@ -9,7 +9,7 @@ from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from bot.media import send_by_kind
+from bot.media import can_edit_media, edit_media_in_place, html_caption, send_by_kind
 from bot.services import Services, svc
 from bot.ui import btn, kb, say
 from core.files import PARTS, TYPES_PLURAL, build_caption, file_title
@@ -173,7 +173,8 @@ async def send_file(bot: Any, s: Services, chat_id: int, tg: int, fid: int) -> N
             raise TelegramError("no source")
         await bot.copy_message(chat_id, f["src_chat"], f["src_msg"])   # دون إعادة رفع
     except TelegramError:
-        await send_by_kind(bot, chat_id, f["media_kind"], f["file_id"])
+        # تعذّر النسخ (لا مجتمع مضبوط / حُذفت الرسالة): نرسل بـ file_id مع نفس التعليق المعتمد (علامات 🔹)
+        await send_by_kind(bot, chat_id, f["media_kind"], f["file_id"], html_caption(f.get("caption")))
 
 
 # ---------------- الرفع (البيانات من التطبيق ثم الملف هنا) ----------------
@@ -201,30 +202,44 @@ async def handle_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, m: d
     caption = build_caption(meta, subj["tag"], doc["name"] if doc else None)
     post: dict[str, Any] = {"caption": caption}
     warn = None
-    dest = await s.destination(f"cohort:subject:{subj['id']}")
-    if dest:
+    rep = prep.get("replace") or {}
+    old_ref = (rep["chat_id"], rep["message_id"]) if rep.get("chat_id") and rep.get("message_id") else None
+
+    # استبدال: نعدّل رسالة المجتمع القديمة نفسها (تبقى في مكانها)، ولا ننشر رسالة جديدة إلا إن تعذّر التعديل
+    edited = False
+    if old_ref and can_edit_media(m["media_kind"]):
         try:
-            sent = await context.bot.copy_message(chat_id=dest["chat_id"], from_chat_id=chat,
-                                                  message_id=update.effective_message.message_id,
-                                                  caption=caption, message_thread_id=dest.get("topic_id"))
-            post.update(chat_id=dest["chat_id"], topic_id=dest.get("topic_id"), message_id=sent.message_id)
+            await edit_media_in_place(context.bot, old_ref[0], old_ref[1], m["media_kind"], m["file_id"], caption)
+            post.update(chat_id=old_ref[0], topic_id=rep.get("topic_id"), message_id=old_ref[1])
+            edited = True
         except TelegramError as exc:
-            warn = f"تعذّر النشر في المجتمع ({exc.message}). تأكد أن البوت مشرف فيه."
-    else:
-        warn = "لم يُضبط مجتمع هذه المادة بعد، فحُفظ الملف ويظهر للطلاب في البوت والتطبيق."
+            log.warning("edit in place failed (%s); reposting", getattr(exc, "message", exc))
+
+    if not edited:
+        dest = await s.destination(f"cohort:subject:{subj['id']}")
+        if dest:
+            try:
+                sent = await context.bot.copy_message(chat_id=dest["chat_id"], from_chat_id=chat,
+                                                      message_id=update.effective_message.message_id,
+                                                      caption=caption, message_thread_id=dest.get("topic_id"))
+                post.update(chat_id=dest["chat_id"], topic_id=dest.get("topic_id"), message_id=sent.message_id)
+            except TelegramError as exc:
+                warn = f"تعذّر النشر في المجتمع ({exc.message}). تأكد أن البوت مشرف فيه."
+        else:
+            warn = "لم يُضبط مجتمع هذه المادة بعد، فحُفظ الملف ويظهر للطلاب في البوت والتطبيق."
 
     res = await s.store.rpc("register_file", {"p_actor": tg, "p_draft": prep["draft_id"], "p_media": m, "p_post": post})
     if res["status"] != "ok":
         await say(context.bot, chat, "تعذّر حفظ الملف. أعد المحاولة من التطبيق.")
         return True
     context.user_data.pop("up", None)
-    old = res.get("old")
-    if old:   # استبدال نسخة أقدم: نحذف رسالتها من المجتمع
+    if old_ref and not edited:   # تعذّر التعديل في المكان وتم نشر بديل: نحذف الرسالة القديمة من المجتمع
         try:
-            await context.bot.delete_message(old["chat_id"], old["message_id"])
+            await context.bot.delete_message(old_ref[0], old_ref[1])
         except TelegramError:
             pass
-    await say(context.bot, chat, "تم رفع الملف ✅" + (f"\n⚠️ {warn}" if warn else ""))
+    done = "تم استبدال الملف في مكانه ✅" if edited else "تم رفع الملف ✅"
+    await say(context.bot, chat, done + (f"\n⚠️ {warn}" if warn else ""))
     return True
 
 

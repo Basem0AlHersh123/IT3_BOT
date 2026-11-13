@@ -4,7 +4,19 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from telegram import InputMediaAnimation, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo
+from telegram.error import BadRequest
+
 from core.text import fit_caption
+
+# الأنواع التي يقبلها تيليجرام في editMessageMedia (الرسائل الصوتية ورسائل الفيديو الدائرية غير مدعومة)
+_INPUT_MEDIA = {
+    "document": InputMediaDocument,
+    "photo": InputMediaPhoto,
+    "video": InputMediaVideo,
+    "audio": InputMediaAudio,
+    "animation": InputMediaAnimation,
+}
 
 
 def extract(msg: Any) -> dict[str, Any] | None:
@@ -54,3 +66,23 @@ async def send_by_kind(
                "animation": ("send_animation", "animation"), "photo": ("send_photo", "photo")}
     method, arg = senders.get(kind, ("send_document", "document"))
     return await getattr(bot, method)(**{arg: file_id}, caption=caption, **kw)
+
+
+def html_caption(caption: str | None) -> str | None:
+    """تعليق صالح لـ parse_mode=HTML: نُهرّب الرموز الخاصة وتبقى علامات 🔹 والوسوم كما هي."""
+    return escape(caption) if caption else None
+
+
+def can_edit_media(kind: str | None) -> bool:
+    return kind in _INPUT_MEDIA
+
+
+async def edit_media_in_place(bot: Any, chat_id: int, message_id: int, kind: str, file_id: str, caption: str | None = None) -> None:
+    """يبدّل ملف الرسالة نفسها (editMessageMedia) فيبقى موضعها ورقمها كما هما. يرفع TelegramError عند الفشل.
+    «message is not modified» (نفس الملف والتعليق) يُعدّ نجاحًا."""
+    cls = _INPUT_MEDIA[kind]
+    try:
+        await bot.edit_message_media(chat_id=chat_id, message_id=message_id, media=cls(media=file_id, caption=caption))
+    except BadRequest as exc:
+        if "not modified" not in (getattr(exc, "message", "") or str(exc)).lower():
+            raise

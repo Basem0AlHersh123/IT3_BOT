@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TelegramError, TimedOut
 
 from bot import assignments
-from bot.media import send_by_kind
+from bot.media import html_caption, send_by_kind
 from bot.services import Services
 from bot.ui import btn, kb, say, webapp_btn
 from core import messages
@@ -109,7 +109,7 @@ class Worker:
                         raise BadRequest("no source message")
                     msg = await self.bot.copy_message(chat, p["src_chat"], p["src_msg"])
                 except BadRequest:
-                    msg = await send_by_kind(self.bot, chat, p["media_kind"], p["file_id"])
+                    msg = await send_by_kind(self.bot, chat, p["media_kind"], p["file_id"], html_caption(p.get("caption")))
             elif kind == "tg_delete":
                 try:
                     await self.bot.delete_message(chat, p["message_id"])
