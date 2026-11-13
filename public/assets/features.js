@@ -412,7 +412,7 @@ B.views.upload = () => {
     : '';
   return `<div class="card">
     <b>📤 بيانات الملف قبل الإرسال</b>
-    ${u.replaces_id ? '<div class="stale" style="margin:10px 0">سيحلّ هذا الملف محلّ النسخة القديمة ويُحذف القديم من المجتمع.</div>' : ''}
+    ${u.replaces_id ? '<div class="stale" style="margin:10px 0">سيُستبدل الملف داخل رسالته نفسها في المجتمع (تبقى في مكانها ولا تُنشر من جديد).</div>' : ''}
     <div class="sec">المادة</div><div class="scroll-x wrap">${subs.map(s => pill(s.name, 'u-subj', `data-id="${s.id}"`, u.subject_id === s.id)).join('')}</div>
     <div class="sec">الجزء</div>${seg('u-part', [['theory', 'نظري'], ['practical', 'عملي']], u.part)}
     ${docPicker}
