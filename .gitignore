@@ -1,0 +1,6 @@
+.env
+bot_state.pickle
+__pycache__/
+*.pyc
+supabase/.temp/
+my_cohort.json
