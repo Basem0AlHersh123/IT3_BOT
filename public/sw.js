@@ -2,7 +2,7 @@
    - /assets/* المدموغة بـ ?v=hash: Cache-First دائمًا (صفر طلبات بعد أول تحميل).
    - الصفحة الرئيسية (index.html): Network-First مع احتياطي فوري من الكاش عند انقطاع الشبكة، لضمان ظهور أي تحديث جديد فور رفعه.
    - لا يلمس /api أبدًا. */
-const V = 'bs2-shell-a3dc8229';
+const V = 'bs2-shell-e5603831';
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.add('./').catch(() => {})).then(() => self.skipWaiting()));
 });

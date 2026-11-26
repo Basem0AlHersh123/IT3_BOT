@@ -364,8 +364,7 @@ function renderHome() {
   return `<section class="hero"><h2>أهلًا، ${esc(first)}</h2><div class="chips">${chips.join('')}</div></section>
     <div class="sec">يهمّني الآن</div>${now}
     <div class="sec">الأقسام</div><div class="grid">${feats}</div>
-    ${staff ? `<div class="sec">الإدارة</div><div class="grid">${staff}</div>` : ''}
-    <footer class="dev-credit"><div>Developed by Abdulrhman Alareqi</div><div>Contact <a href="tel:+967778917976">+967778917976</a></div></footer>`;
+    ${staff ? `<div class="sec">الإدارة</div><div class="grid">${staff}</div>` : ''}`;
 }
 
 function renderFeature(id) {
