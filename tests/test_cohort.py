@@ -21,6 +21,13 @@ class DefaultCohortTests(unittest.TestCase):
     """القيم الافتراضية = دفعة CS26 الحالية تمامًا (لا تغيّر النسخة العاملة)."""
 
     def setUp(self):
+        self._saved_env = {k: os.environ.pop(k, None) for k in ("COHORT_CONFIG_JSON", "COHORT_CONFIG")}
+        cohort.set_for_tests(None)
+
+    def tearDown(self):
+        for k, v in self._saved_env.items():
+            if v is not None:
+                os.environ[k] = v
         cohort.set_for_tests(None)
 
     def test_default_groups_match_live_cohort(self):

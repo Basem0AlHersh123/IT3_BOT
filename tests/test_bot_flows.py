@@ -57,6 +57,9 @@ class FakeBot:
     async def copy_message(self, *a, **kw):
         return self._next("copy_message", a=a, **kw)
 
+    async def edit_message_media(self, **kw):
+        return self._next("edit_message_media", **kw)
+
     async def delete_message(self, chat_id, message_id):
         if "delete_message" in self.fail:
             raise self.fail["delete_message"]
@@ -212,9 +215,10 @@ class UploadTests(unittest.TestCase):
         self.assertIn("لم يُضبط مجتمع", c.bot.sent[-1][1]["text"])
 
     def test_replacement_deletes_old_community_message(self):
-        store = FakeStore({"prepare_file": self.PREP,
-                           "register_file": {"status": "ok", "file_id": 9, "old": {"chat_id": -1001, "message_id": 12}}})
-        c = ctx(store, {"cohort:subject:2": {"chat_id": -1001, "topic_id": None}})
+        prep = {**self.PREP, "replace": {"chat_id": -1001, "message_id": 12}}
+        store = FakeStore({"prepare_file": prep, "register_file": {"status": "ok", "file_id": 9}})
+        c = ctx(store, {"cohort:subject:2": {"chat_id": -1001, "topic_id": None}},
+                bot=FakeBot(fail={"edit_message_media": TelegramError("cannot edit")}))
         run(files.handle_upload(upd(), c, self.M))
         self.assertEqual(c.bot.deleted, [(-1001, 12)])
 

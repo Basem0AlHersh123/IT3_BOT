@@ -11,7 +11,7 @@ from html import escape
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TelegramError, TimedOut
+from telegram.error import BadRequest, Forbidden, NetworkError, RetryAfter, TimedOut
 
 from bot import assignments
 from bot.media import html_caption, send_by_kind

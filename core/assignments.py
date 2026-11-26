@@ -1,7 +1,6 @@
 """منطق الواجبات: حالة الطالب، والتحقق من بيانات الإنشاء (الموعد بتوقيت صنعاء)."""
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta
 from typing import Any, Mapping
 

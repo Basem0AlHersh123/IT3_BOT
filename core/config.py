@@ -1,9 +1,10 @@
 """إعدادات من متغيرات البيئة فقط. لا أسرار داخل الشيفرة."""
 from __future__ import annotations
-from dotenv import load_dotenv
-load_dotenv()
 import os
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def _req(name: str) -> str:

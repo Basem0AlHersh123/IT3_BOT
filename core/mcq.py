@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import io
 import re
-from typing import Any, Mapping
+from typing import Any
 
 from core.attendance import _build_xlsx_minimal
 

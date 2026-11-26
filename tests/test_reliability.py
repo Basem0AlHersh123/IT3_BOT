@@ -7,7 +7,6 @@ from tests import stubs
 
 stubs.install()
 
-from telegram.error import BadRequest  # noqa: E402
 
 from bot import assignments  # noqa: E402
 from bot.locks import per_user  # noqa: E402
@@ -70,7 +69,7 @@ class PerUserLockTests(unittest.TestCase):
 
         run(main())
         # للمستخدم 1: لا تداخل (a تنتهي قبل بدء b)
-        ia, oa, ib = order.index(("in", "a")), order.index(("out", "a")), order.index(("in", "b"))
+        _ia, oa, ib = order.index(("in", "a")), order.index(("out", "a")), order.index(("in", "b"))
         self.assertLess(oa, ib)
         self.assertLess(order.index(("in", "c")), oa)   # المستخدم 2 لم ينتظر
 

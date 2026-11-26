@@ -202,7 +202,8 @@ class GroupNormalizeTests(unittest.TestCase):
 
 class ImportReadTests(unittest.TestCase):
     def test_read_template(self):
-        import importlib.util, pathlib
+        import importlib.util
+        import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
         spec = importlib.util.spec_from_file_location("imp", root / "scripts" / "import_students.py")
         mod = importlib.util.module_from_spec(spec)

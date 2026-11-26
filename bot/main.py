@@ -1,7 +1,7 @@
 """البوت — Polling على Orihost.
 في البوت: الدخول والربط + نظام الملفات + نظام الواجبات (يعرض غير المسلَّمة فقط ويدعم التعديل المباشر من التطبيق) + نظام اختبارات MCQ التفاعلي عبر استفتاءات تيليجرام (إلى جانب الـ Mini App) + الإشعارات + استقبال المرفقات من الـ Mini App + الربط السريع للمجتمعات بأزرار /where."""
 from __future__ import annotations
-import sys 
+import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 import logging

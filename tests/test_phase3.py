@@ -6,7 +6,6 @@
 - تدفقات البوت وعامل الإرسال (Worker) للمرحلة 3."""
 from __future__ import annotations
 
-import asyncio
 import io
 import unittest
 from datetime import datetime, timedelta, timezone

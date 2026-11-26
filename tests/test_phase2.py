@@ -8,7 +8,6 @@ from core.files import build_caption, file_title, hashtag, validate_file_meta
 from core.messages import (assignment_new, assignment_reminder, humanize_remaining, render_notification,
                            submission_header)
 from core.ratelimit import TokenBucket
-from core.timeutil import parse_sanaa
 
 UTC = timezone.utc
 

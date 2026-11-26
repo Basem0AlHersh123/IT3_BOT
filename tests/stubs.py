@@ -54,7 +54,9 @@ def install():
             self.rows = rows
 
     _mod("telegram", InlineKeyboardButton=Simple, InlineKeyboardMarkup=Markup, WebAppInfo=Simple,
-         MenuButtonWebApp=Simple, Update=Simple, Poll=Poll)
+         MenuButtonWebApp=Simple, Update=Simple, Poll=Poll,
+         InputMediaAnimation=Simple, InputMediaAudio=Simple, InputMediaDocument=Simple,
+         InputMediaPhoto=Simple, InputMediaVideo=Simple)
     _mod("telegram.error", TelegramError=TelegramError, NetworkError=TelegramError, BadRequest=BadRequest,
          TimedOut=TimedOut, Forbidden=Forbidden, RetryAfter=RetryAfter)
     _mod("telegram.ext", Application=Simple, CallbackQueryHandler=Simple, CommandHandler=Simple,

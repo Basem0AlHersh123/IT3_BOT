@@ -11,7 +11,6 @@ from core.attendance import _build_xlsx_minimal
 def build_doctor_assignment_xlsx(data: Mapping[str, Any]) -> bytes:
     """يبني ملف Excel (RTL) لواجب مجموعة منفردة: (1 سلّم، 0 لم يسلّم)."""
     asg = data.get("assignment") or {}
-    subj = asg.get("subject") or "المادة"
     grp = asg.get("group") or "المجموعة"
     num = asg.get("number") or 1
 

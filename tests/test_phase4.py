@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import io
 import unittest
-from datetime import date, timedelta
+from datetime import date
 from types import SimpleNamespace as NS
 
 from openpyxl import Workbook, load_workbook
