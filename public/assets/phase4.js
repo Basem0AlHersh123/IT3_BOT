@@ -113,9 +113,9 @@ const P4 = S.p4 = {
   ntf: { group: '', title: '', body: '', busy: false, err: '' },
   dev: {
     tab: 'students', ov: null, students: null, stuGroup: '', stuQ: '', stuForm: null, guests: null, cat: null,
-    scopes: null, scopedRoles: null,
+    scopes: null, scopedRoles: null, roleInvites: null, userResults: null, lastInvite: null,
     scopeForm: { kind: 'major', parent_id: '', code: '', name_ar: '', batch: '', level: '', theory_prefix: '' },
-    roleForm: { telegram_id: '', role: 'cohort_admin', scope_node_id: '', group: '' },
+    roleForm: { telegram_id: '', selected_label: '', user_q: '', role: 'cohort_admin', scope_node_id: '', ttl_hours: '24', note: '', group: '' },
     subjForm: { name_ar: '', hashtag: '' },
     docForm: { name: '', telegram_id: '' },
     teachForm: { subject_id: '', part: 'theory', groups: [], doctor_id: '' },
@@ -1112,6 +1112,9 @@ function loadDevSub(sub, force = false) {
     swr('dev-scoped-roles', '/api/admin/roles', d => {
       if (d && Array.isArray(d.roles)) { dv.scopedRoles = d.roles; rerender(); }
     }, force);
+    swr('dev-role-invites', '/api/admin/roles/invites', d => {
+      if (d && Array.isArray(d.invites)) { dv.roleInvites = d.invites; rerender(); }
+    }, force);
   } else if (sub === 'catalog') {
     swr('dev-cat', '/api/dev/catalog', d => {
       if (d) {
@@ -1318,10 +1321,12 @@ B.views['dev-view'] = sub => {
       rf.scope_node_id = String(targetNodes[0].id);
     }
 
+    const invites = dv.roleInvites || [];
+    const results = dv.userResults;
+
     return `<div class="card" style="margin-bottom:12px">
-        <b>منح دور بنطاق (Scoped Role Grant)</b>
-        <div class="two" style="margin-top:8px">
-          <input class="field" dir="ltr" inputmode="numeric" data-f4="devRole.telegram_id" placeholder="Telegram ID" value="${esc(rf.telegram_id)}">
+        <b>1) اختر الدور والنطاق</b>
+        <div style="margin-top:8px">
           <select class="field" data-f4="devRole.role">
             <option value="college_admin" ${rf.role === 'college_admin' ? 'selected' : ''}>مشرف الكلية (College Admin)</option>
             <option value="major_admin" ${rf.role === 'major_admin' ? 'selected' : ''}>مشرف التخصص (Major Admin)</option>
@@ -1338,8 +1343,46 @@ B.views['dev-view'] = sub => {
             ${targetNodes.map(n => `<option value="${n.id}" ${String(rf.scope_node_id) === String(n.id) ? 'selected' : ''}>${esc(scopePathLabel(n, byId))} (${esc(SCOPE_KIND_LABELS[n.kind] || n.kind)})</option>`).join('') || '<option value="">لا توجد عقدة نطاق متاحة لهذا الدور</option>'}
           </select>
         </div>` : '<p class="muted" style="margin:8px 0 0;font-size:13px">صلاحية المطوّر تشمل الكلية وكل التخصصات والدفعات.</p>'}
-        <button class="btn primary sm" style="margin-top:10px" data-act="dev-role-grant">منح الصلاحية</button>
       </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <b>2) منح مباشر — ابحث بالاسم أو @المعرف أو الرقم الأكاديمي</b>
+        <div class="row-actions" style="margin-top:8px">
+          <input class="field" style="flex:1" data-f4="devRole.user_q" placeholder="اسم، @username، رقم أكاديمي، أو ID" value="${esc(rf.user_q || '')}">
+          <button class="btn sm" style="width:auto" data-act="dev-user-search">بحث</button>
+        </div>
+        ${rf.telegram_id ? `<div class="meta" style="margin-top:8px">${chip('المختار: ' + (rf.selected_label || ('TG ' + rf.telegram_id)), 'ok')}<button class="btn sm" style="width:auto;min-height:30px;padding:0 10px" data-act="dev-user-clear">مسح</button></div>` : ''}
+        ${Array.isArray(results) ? `<div style="margin-top:8px">${results.map(u => `<button class="item" style="margin-bottom:6px;padding:10px 12px" data-act="dev-user-pick" data-id="${u.telegram_id}" data-label="${esc(u.name + (u.username ? ' (@' + u.username + ')' : ''))}">
+          <div class="item-main"><b>${esc(u.name)}</b><div class="meta">${u.username ? `<code>@${esc(u.username)}</code>` : ''}${u.academic_no ? chip(u.academic_no) : ''}${u.theory_group_id ? chip(u.theory_group_id) : ''}</div></div>
+          <span class="chip">اختيار</span>
+        </button>`).join('') || '<p class="muted" style="margin:6px 0 0;font-size:13px">لا توجد نتائج. اطلب منه فتح البوت /start أولًا، أو استخدم رابط الدعوة أدناه.</p>'}</div>` : ''}
+        <button class="btn primary sm" style="margin-top:10px" data-act="dev-role-grant">منح الصلاحية للمستخدم المختار</button>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <b>3) رابط دعوة لمرة واحدة (بدون الحاجة لـ Telegram ID)</b>
+        <p class="muted" style="margin:4px 0 8px;font-size:13px">أنشئ رابطًا وأرسله للمشرف؛ بمجرد ضغطه على Start تُفعَّل صلاحيته تلقائيًا وينتهي الرابط.</p>
+        <div class="two">
+          <select class="field" data-f4="devRole.ttl_hours">
+            <option value="6" ${String(rf.ttl_hours) === '6' ? 'selected' : ''}>صالح 6 ساعات</option>
+            <option value="24" ${String(rf.ttl_hours || '24') === '24' ? 'selected' : ''}>صالح 24 ساعة</option>
+            <option value="72" ${String(rf.ttl_hours) === '72' ? 'selected' : ''}>صالح 3 أيام</option>
+            <option value="168" ${String(rf.ttl_hours) === '168' ? 'selected' : ''}>صالح 7 أيام</option>
+          </select>
+          <input class="field" data-f4="devRole.note" placeholder="ملاحظة (مثل: مشرف IT3)" value="${esc(rf.note || '')}">
+        </div>
+        <button class="btn primary sm" style="margin-top:10px" data-act="dev-invite-create">إنشاء رابط دعوة لمرة واحدة</button>
+        ${dv.lastInvite && dv.lastInvite.url ? `<div class="key-box">${esc(dv.lastInvite.url)}</div>
+          <button class="btn sm" data-act="dev-invite-copy" data-url="${esc(dv.lastInvite.url)}">📋 نسخ رابط الدعوة</button>` : ''}
+      </div>
+
+      ${invites.length ? `<div class="sec">الدعوات المعلّقة (${invites.length})</div>
+      ${invites.map(inv => `<div class="item">
+        <div class="item-main"><b>${esc(ROLE_LABELS[inv.role] || inv.role)}${inv.note ? ' — ' + esc(inv.note) : ''}</b>
+          <div class="meta">${chip(inv.scope_name || inv.scope_code || 'المنصة كاملة')}<span>ينتهي: ${esc(fmtDT(inv.expires_at))}</span></div></div>
+        <button class="btn sm danger" style="width:auto" data-act="dev-invite-rev" data-id="${inv.id}">إلغاء</button>
+      </div>`).join('')}` : ''}
+
       <div class="sec">المشرفون الحاليون (${rolesList.length})</div>
       ${rolesList.map(r => {
         const scopeBadge = r.role === 'developer'
@@ -1951,12 +1994,76 @@ Object.assign(B.actions, {
     if (B.refresh) B.refresh(true);
   },
   'dev-rgrp': d => { P4.dev.roleForm.group = d.v; rerender(); },
+  'dev-user-search': async () => {
+    const rf = P4.dev.roleForm;
+    const q = (rf.user_q || '').trim();
+    if (/^\d{5,}$/.test(q)) {
+      rf.telegram_id = q;
+      rf.selected_label = 'TG ' + q;
+    }
+    const qs = new URLSearchParams({ q });
+    if (rf.role !== 'developer' && rf.scope_node_id) qs.set('scope_node_id', rf.scope_node_id);
+    const r = await B.api('/api/admin/users/search?' + qs.toString());
+    if (r.status === 200 && r.data) {
+      P4.dev.userResults = r.data.users || [];
+      rerender();
+    } else {
+      B.toast('تعذّر البحث عن المستخدمين.');
+    }
+  },
+  'dev-user-pick': d => {
+    P4.dev.roleForm.telegram_id = String(d.id);
+    P4.dev.roleForm.selected_label = d.label || ('TG ' + d.id);
+    P4.dev.userResults = null;
+    rerender();
+  },
+  'dev-user-clear': () => {
+    P4.dev.roleForm.telegram_id = '';
+    P4.dev.roleForm.selected_label = '';
+    rerender();
+  },
+  'dev-invite-create': async () => {
+    const rf = P4.dev.roleForm;
+    if (rf.role !== 'developer' && !rf.scope_node_id) return B.toast('اختر عقدة النطاق أولًا.');
+    const r = await call('/api/admin/roles/invites', 'POST', {
+      role: rf.role,
+      scope_node_id: rf.role === 'developer' ? null : +rf.scope_node_id,
+      ttl_hours: +(rf.ttl_hours || 24),
+      note: (rf.note || '').trim() || null,
+    });
+    if (r.status === 403) return B.toast('لا تملك صلاحية إنشاء دعوة لهذا الدور أو النطاق.');
+    if (r.status !== 200 || !r.data || r.data.status !== 'ok') return B.toast('تعذّر إنشاء رابط الدعوة.');
+    P4.dev.lastInvite = r.data;
+    rf.note = '';
+    B.ls.delPrefix('dev-role-invites');
+    B.toast('تم إنشاء رابط الدعوة ✅');
+    loadDevSub('roles', true);
+  },
+  'dev-invite-copy': async d => {
+    try {
+      await navigator.clipboard.writeText(d.url || '');
+      B.toast('تم نسخ رابط الدعوة 📋');
+    } catch {
+      B.toast('انسخ الرابط من المربع أعلاه.');
+    }
+  },
+  'dev-invite-rev': d => ask('إلغاء رابط الدعوة هذا؟', async () => {
+    const r = await call('/api/admin/roles/invites/revoke', 'POST', { invite_id: +d.id });
+    if (r.status === 200 && r.data && r.data.status === 'ok') {
+      B.ls.delPrefix('dev-role-invites');
+      B.toast('تم إلغاء رابط الدعوة');
+      loadDevSub('roles', true);
+    } else {
+      B.toast('تعذّر إلغاء الدعوة.');
+    }
+  }),
   'dev-role-grant': async () => {
     const rf = P4.dev.roleForm;
-    if (!rf.telegram_id) return B.toast('أدخل Telegram ID.');
+    const rawId = (rf.telegram_id || (/^\d{5,}$/.test((rf.user_q || '').trim()) ? rf.user_q.trim() : ''));
+    if (!rawId) return B.toast('ابحث واختر مستخدمًا أولًا (أو أدخل Telegram ID).');
     if (rf.role !== 'developer' && !rf.scope_node_id) return B.toast('اختر عقدة النطاق.');
     const r = await call('/api/admin/roles/grant', 'POST', {
-      telegram_id: +rf.telegram_id,
+      telegram_id: +rawId,
       role: rf.role,
       scope_node_id: rf.role === 'developer' ? null : +rf.scope_node_id,
     });
@@ -1966,6 +2073,8 @@ Object.assign(B.actions, {
       return B.toast(st === 'exists' ? 'هذه الصلاحية ممنوحة بالفعل.' : 'تعذّر منح الصلاحية.');
     }
     rf.telegram_id = '';
+    rf.selected_label = '';
+    rf.user_q = '';
     B.ls.delPrefix('dev-scoped-roles');
     B.toast('تم منح الصلاحية ✅');
     loadDevSub('roles', true);

@@ -11,7 +11,7 @@ from typing import Any, Iterable, Mapping, Sequence
 # نفس ترتيب backup_tables() في 0017_scope_tree.sql (يحترم المفاتيح الأجنبية)
 BACKUP_TABLES: list[str] = [
     "app_settings", "data_versions", "scope_nodes", "theory_groups", "practical_groups", "subjects", "doctors", "teaching",
-    "tg_destinations", "students", "users", "role_grants", "role_permissions", "activity_log", "link_attempts",
+    "tg_destinations", "students", "users", "role_grants", "role_invites", "role_permissions", "activity_log", "link_attempts",
     "user_settings", "notifications", "drafts", "files", "assignments", "assignment_files", "submissions",
     "submission_files", "submission_deliveries", "reminders_sent", "attendance_sessions", "scanner_devices",
     "attendance_records", "attendance_corrections", "barcode_logs", "grievance_cycles", "grievances",

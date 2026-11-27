@@ -31,6 +31,7 @@ from bot.ui import btn, kb, kb_confirm, kb_entry, kb_menu, say, webapp_btn
 from bot.worker import Worker
 from core.config import load_settings
 from core.flood import NOTICE, OK, FloodGuard
+from core.invites import format_claim_message, hash_invite_token, parse_invite_payload
 from core.permissions import can
 from core.store import StoreError
 from core.text import clean_name, normalize_academic_no
@@ -78,10 +79,25 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     kind = prof["user"]["kind"]
     if kind == "banned":
         return await say(context.bot, chat, texts.BANNED)
+
+    payload = context.args[0] if context.args else ""
+    inv_token = parse_invite_payload(payload)
+    if inv_token:
+        res = await s.store.rpc("claim_role_invite", {
+            "p_tg": tg.id,
+            "p_token_hash": hash_invite_token(inv_token),
+            "p_display_name": tg.full_name or "",
+            "p_username": tg.username or "",
+        })
+        await say(context.bot, chat, format_claim_message(res or {}))
+        if isinstance(res, dict) and res.get("status") == "ok":
+            prof = await s.profile(tg, force=True)
+            await send_menu(update, context, prof)
+        return
+
     if kind == "new":
         return await send_entry(update, context)
 
-    payload = context.args[0] if context.args else ""
     kind_p, _, ident = payload.partition("_")
     if ident.isdigit():
         n = int(ident)

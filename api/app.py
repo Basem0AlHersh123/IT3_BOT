@@ -16,10 +16,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from api.deps import current_user, etag_response, store
+from api.deps import current_user, etag_response, settings, store
 from api.phase2 import router as phase2_router
 from api.phase3 import router as phase3_router
 from api.phase4 import router as phase4_router
+from core.invites import build_invite_link, generate_invite_token, hash_invite_token
 from core.store import StoreError
 from core.text import clean_name, normalize_academic_no
 from core.tg_auth import TgUser
@@ -221,6 +222,70 @@ async def admin_grant_role(body: ScopedRoleGrantIn, user: TgUser = Depends(curre
     return _no_store(await store().grant_role_scoped(user.id, body.telegram_id, body.role, body.scope_node_id))
 
 
+class RoleInviteCreateIn(BaseModel):
+    role: str = Field(max_length=32)
+    scope_node_id: int | None = None
+    ttl_hours: int = Field(default=24, ge=1, le=168)
+    note: str | None = Field(default=None, max_length=120)
+
+
+class RoleInviteRevokeIn(BaseModel):
+    invite_id: int
+
+
 @app.post("/api/admin/roles/revoke")
 async def admin_revoke_role(body: ScopedRoleRevokeIn, user: TgUser = Depends(current_user)) -> Response:
     return _no_store(await store().rpc("revoke_role", {"p_actor": user.id, "p_grant_id": body.grant_id}))
+
+
+@app.get("/api/admin/users/search")
+async def admin_search_users(
+    q: str = "",
+    scope_node_id: int | None = None,
+    limit: int = 15,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    rows = await store().rpc("search_users_for_role", {
+        "p_actor": user.id,
+        "p_query": q[:80],
+        "p_scope_node_id": scope_node_id,
+        "p_limit": max(1, min(limit, 30)),
+    })
+    return _no_store({"users": rows or []})
+
+
+@app.get("/api/admin/roles/invites")
+async def admin_list_role_invites(
+    root_id: int | None = None,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    invites = await store().rpc("list_role_invites", {"p_actor": user.id, "p_root_id": root_id})
+    return _no_store({"invites": invites or []})
+
+
+@app.post("/api/admin/roles/invites")
+async def admin_create_role_invite(
+    body: RoleInviteCreateIn,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    token = generate_invite_token()
+    token_hash = hash_invite_token(token)
+    res = await store().rpc("create_role_invite", {
+        "p_actor": user.id,
+        "p_token_hash": token_hash,
+        "p_role": body.role,
+        "p_scope_node_id": body.scope_node_id,
+        "p_ttl_hours": body.ttl_hours,
+        "p_note": body.note,
+    })
+    if isinstance(res, dict) and res.get("status") == "ok":
+        res = {**res, "url": build_invite_link(settings().bot_username, token), "token": token}
+    return _no_store(res)
+
+
+@app.post("/api/admin/roles/invites/revoke")
+async def admin_revoke_role_invite(
+    body: RoleInviteRevokeIn,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    return _no_store(await store().rpc("revoke_role_invite", {"p_actor": user.id, "p_invite_id": body.invite_id}))

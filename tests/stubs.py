@@ -59,6 +59,8 @@ def install():
          InputMediaPhoto=Simple, InputMediaVideo=Simple)
     _mod("telegram.error", TelegramError=TelegramError, NetworkError=TelegramError, BadRequest=BadRequest,
          TimedOut=TimedOut, Forbidden=Forbidden, RetryAfter=RetryAfter)
-    _mod("telegram.ext", Application=Simple, CallbackQueryHandler=Simple, CommandHandler=Simple,
+    _mod("telegram.ext", Application=Simple, ApplicationHandlerStop=Exception,
+         TypeHandler=Simple, PersistenceInput=Simple, PicklePersistence=Simple,
+         CallbackQueryHandler=Simple, CommandHandler=Simple,
          MessageHandler=Simple, PollAnswerHandler=Simple,
          ContextTypes=types.SimpleNamespace(DEFAULT_TYPE=object), filters=Simple())
