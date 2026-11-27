@@ -26,7 +26,7 @@ def generate_seed_sql(
     batch: str = "3",
     level: str = "المستوى الثالث",
     theory_prefix: str = "IT3_G",
-    practical_per_theory: Sequence[int] = (2, 2, 2, 2),
+    practical_per_theory: Sequence[int] = (3, 3, 3, 3),
 ) -> str:
     """Return an idempotent SQL block seeding College -> Major -> Cohort -> Theory/Practical Groups."""
     meta_json = json.dumps(

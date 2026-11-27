@@ -11,7 +11,7 @@ import zipfile
 from typing import Any, Mapping
 from xml.sax.saxutils import escape as xml_escape
 
-from core.text import normalize_academic_no, normalize_theory
+from core.text import normalize_academic_no, normalize_practical, normalize_theory
 
 MAX_LECTURES = 12
 
@@ -57,7 +57,10 @@ def validate_session_open(meta: Mapping[str, Any]) -> tuple[dict[str, Any] | Non
         subject_id = int(meta.get("subject_id"))
     except (TypeError, ValueError):
         return None, "invalid_subject"
-    group = normalize_theory(meta.get("group"))
+    part = str(meta.get("part") or "theory").strip().lower()
+    if part not in ("theory", "practical"):
+        return None, "invalid_part"
+    group = normalize_practical(meta.get("group")) if part == "practical" else normalize_theory(meta.get("group"))
     if not group:
         return None, "invalid_group"
     try:
@@ -67,12 +70,15 @@ def validate_session_open(meta: Mapping[str, Any]) -> tuple[dict[str, Any] | Non
     if not (1 <= lecture_no <= MAX_LECTURES):
         return None, "invalid_lecture"
     delegate_absent = bool(meta.get("delegate_absent", False))
-    return {
+    out: dict[str, Any] = {
         "subject_id": subject_id,
         "group": group,
         "lecture_no": lecture_no,
         "delegate_absent": delegate_absent,
-    }, None
+    }
+    if part == "practical":
+        out["part"] = "practical"
+    return out, None
 
 
 def validate_correction(meta: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
@@ -80,7 +86,10 @@ def validate_correction(meta: Mapping[str, Any]) -> tuple[dict[str, Any] | None,
         subject_id = int(meta.get("subject_id"))
     except (TypeError, ValueError):
         return None, "invalid_subject"
-    group = normalize_theory(meta.get("group"))
+    part = str(meta.get("part") or "theory").strip().lower()
+    if part not in ("theory", "practical"):
+        return None, "invalid_part"
+    group = normalize_practical(meta.get("group")) if part == "practical" else normalize_theory(meta.get("group"))
     if not group:
         return None, "invalid_group"
     try:

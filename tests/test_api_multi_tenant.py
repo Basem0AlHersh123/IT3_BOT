@@ -72,9 +72,9 @@ class MultiTenantCoreAndSeedTests(unittest.TestCase):
         self.assertIn("'csit'", sql)
         self.assertIn("'it'", sql)
         self.assertIn("'it3'", sql)
-        for g in ("IT3_G1", "IT3_G2", "IT3_G3", "IT3_G4", "G1", "G8"):
+        for g in ("IT3_G1", "IT3_G2", "IT3_G3", "IT3_G4", "G1", "G12"):
             self.assertIn(f"'{g}'", sql)
-        self.assertNotIn("'G9'", sql)
+        self.assertNotIn("'G13'", sql)
 
     def test_worker_all_theory_targets_enumerates_every_cohort(self) -> None:
         import tests.stubs  # noqa: F401

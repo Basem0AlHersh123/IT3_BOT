@@ -275,5 +275,30 @@ class Migration0022AssignmentNumberReuseTests(unittest.TestCase):
         self.assertIn("grant execute on function next_active_assignment_number(", self.sql)
 
 
+class Migration0024PracticalAttendanceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sql = (MIGRATIONS_DIR / "0024_practical_attendance.sql").read_text("utf-8")
+
+    def test_practical_attendance_schema_and_isolation(self) -> None:
+        for needle in (
+            "add column if not exists part text not null default 'theory'",
+            "add column if not exists practical_group_id text references practical_groups(code)",
+            "add column if not exists scope_node_id bigint references scope_nodes(id)",
+            "drop index if exists attendance_sessions_scope_lecture_uq;",
+            "drop index if exists attendance_one_open_per_theory_node_uq;",
+            "attendance_one_open_per_scope_uq",
+            "on conflict (code) do nothing;",
+            "create or replace function open_attendance_session_scoped(",
+            "create or replace function scan_attendance(",
+            "create or replace function attendance_matrix_scoped(",
+            "if sess.part = 'practical' then",
+            "trg_scope_nodes_sync_legacy_groups",
+            "actor_max_role_rank(p_actor, ri.scope_node_id) <= role_rank(ri.role)",
+            "v_is_dev boolean := is_developer(p_actor);",
+            "grant execute on function attendance_matrix_scoped(",
+        ):
+            self.assertIn(needle, self.sql)
+
+
 if __name__ == "__main__":
     unittest.main()

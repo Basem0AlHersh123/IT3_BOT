@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import base64
-import io
 import re
 from datetime import date
 from html import escape
@@ -16,7 +15,6 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 
 from api.deps import build_bot_link, current_user, etag_response, scope_resolver, settings, store
@@ -30,6 +28,8 @@ from core.reports import (
     validate_template_slots,
 )
 from core.sharek import build_sharek_xlsx, validate_sharek_campaign
+from core.store import StoreError
+from core.student_import import parse_students_excel
 from core.text import clean_name, normalize_academic_no, normalize_practical, normalize_theory
 from core.tg_auth import TgUser
 
@@ -740,27 +740,56 @@ class DevStudentsImportIn(BaseModel):
 async def dev_students_import(body: DevStudentsImportIn, user: TgUser = Depends(current_user)) -> JSONResponse:
     try:
         raw = base64.b64decode(body.excel_base64)
-        ws = load_workbook(io.BytesIO(raw), read_only=True, data_only=True).active
     except Exception as exc:
         raise HTTPException(422, "invalid_excel") from exc
 
-    rows: list[dict[str, str]] = []
-    for cells in ws.iter_rows(min_row=2, values_only=True):
-        if not cells or not any(cells):
-            continue
-        no_raw, name_raw, th_raw, pr_raw = (list(cells) + [None] * 4)[:4]
-        if isinstance(no_raw, float) and no_raw.is_integer():
-            no_raw = int(no_raw)
-        no = normalize_academic_no(str(no_raw or ""))
-        name = clean_name(str(name_raw or ""), max_len=80)
-        th, pr = normalize_theory(th_raw), normalize_practical(pr_raw)
-        if no and name and th and pr:
-            rows.append({"academic_no": no, "full_name": name, "theory": th, "practical": pr})
+    cohort_ctx = None
+    try:
+        boot = await store().bootstrap(user.id, user.full_name, user.username)
+        active = (boot or {}).get("active_cohort") or {}
+        cid = active.get("id")
+        if cid:
+            cohort_ctx = await scope_resolver().get_cohort(int(cid))
+    except (StoreError, ValueError, TypeError):
+        cohort_ctx = None
 
-    if not rows:
+    try:
+        parsed = parse_students_excel(raw, cohort_ctx=cohort_ctx, default_practical=True)
+    except Exception as exc:
+        raise HTTPException(422, "invalid_excel") from exc
+
+    if not parsed.rows:
         raise HTTPException(422, "no_valid_rows")
-    res = await store().rpc("import_students", {"p_actor": user.id, "p_rows": rows[:500]})
-    return _no_store(res)
+
+    inserted = 0
+    updated = 0
+    errors: list[Any] = []
+    batch_rows = parsed.rows[:2000]
+    cohort_node_id = cohort_ctx.id if cohort_ctx else None
+
+    for i in range(0, len(batch_rows), 200):
+        chunk = batch_rows[i:i + 200]
+        if cohort_node_id:
+            res = await store().rpc("import_students_scoped", {
+                "p_actor": user.id,
+                "p_cohort_node_id": cohort_node_id,
+                "p_rows": chunk,
+            })
+        else:
+            res = await store().rpc("import_students", {"p_actor": user.id, "p_rows": chunk})
+        if isinstance(res, dict):
+            inserted += int(res.get("inserted") or 0)
+            updated += int(res.get("updated") or 0)
+            errors.extend(res.get("errors") or [])
+
+    return _no_store({
+        "inserted": inserted,
+        "updated": updated,
+        "errors": errors[:30],
+        "sheets_read": parsed.sheets_read,
+        "defaulted_practical": parsed.defaulted_practical,
+        "skipped": len(parsed.problems),
+    })
 
 
 class UnlinkIn(BaseModel):
