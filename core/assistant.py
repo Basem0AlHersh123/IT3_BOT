@@ -272,9 +272,18 @@ def rank_files(rows: Sequence[Mapping[str, Any]], criteria: Mapping[str, Any], l
 # ------------------------------------------------------------------
 # عميل Gemini الاختياري عبر HTTP (بلا مكتبات ثقيلة، مع تدوير المفاتيح والاحتياطي الفوري)
 # ------------------------------------------------------------------
-_GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+_GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
 _key_idx = 0
 _key_cooldown: dict[str, float] = {}
+
+
+def _gemini_models() -> tuple[str, ...]:
+    raw = os.getenv("GEMINI_MODELS", "").strip()
+    if raw:
+        custom = tuple(m.strip() for m in re.split(r"[,;\s]+", raw) if m.strip())
+        if custom:
+            return custom
+    return _GEMINI_MODELS
 
 
 def _gemini_keys() -> list[str]:
@@ -282,13 +291,13 @@ def _gemini_keys() -> list[str]:
     return [k.strip() for k in re.split(r"[,;\s]+", raw) if k.strip()]
 
 
-async def _call_gemini_json(system_prompt: str, user_prompt: str, timeout: float = 4.0, max_tokens: int = 600) -> dict[str, Any] | None:
+async def _call_gemini_json(system_prompt: str, user_prompt: str, timeout: float = 8.0, max_tokens: int = 1000) -> dict[str, Any] | None:
     global _key_idx
     keys = _gemini_keys()
     if not keys:
         return None
     now = time.monotonic()
-    for model in _GEMINI_MODELS:
+    for model in _gemini_models():
         for step in range(len(keys)):
             idx = (_key_idx + step) % len(keys)
             key = keys[idx]
@@ -950,7 +959,7 @@ async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | N
         'أعد JSON فقط: {"answer": "النص", "needs_ticket": boolean}\n'
         f"صفة السائل: {who}\n\n=== الدليل العملي الشامل للطالب ===\n{BOT_GUIDE}"
     )
-    ai_res = await _call_gemini_json(sys_prompt, f"سؤال المستخدم: {clean_q}", timeout=4.0, max_tokens=400)
+    ai_res = await _call_gemini_json(sys_prompt, f"سؤال المستخدم: {clean_q}", timeout=8.0, max_tokens=1000)
     if isinstance(ai_res, dict) and isinstance(ai_res.get("answer"), str) and ai_res["answer"].strip():
         ans_clean = ai_res["answer"].strip()[:1800]
         value = {"answer": ans_clean, "needs_ticket": bool(ai_res.get("needs_ticket", local_ticket))}
