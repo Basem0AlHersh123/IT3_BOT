@@ -18,7 +18,8 @@ import httpx
 from core.assignments import STATUS_AR, parse_ts, student_status
 from core.files import file_title
 from core.timeutil import UTC, format_datetime_ar
-from core import cohort
+
+DEFAULT_COHORT_TITLE = "الكلية"
 
 log = logging.getLogger("assistant")
 
@@ -380,7 +381,7 @@ async def interpret_file_query_ai(query: str, subjects: Sequence[Mapping[str, An
     ai_raw = await cache_get(store, key)
     if not isinstance(ai_raw, dict):
         sys_prompt = (
-            f"أنت مساعد بحث ملفات دراسية لبوت {cohort.get().title}.\n"
+            f"أنت مساعد بحث ملفات دراسية لبوت {DEFAULT_COHORT_TITLE}.\n"
             "حوّل طلب الطالب إلى JSON بالمفاتيح التالية فقط:\n"
             '{"subject_id": number|null, "part": "theory"|"practical"|null, '
             '"content_type": "lecture"|"summary"|"exam"|"exercises"|"translation"|"reference"|"benefit"|null, '
@@ -558,12 +559,23 @@ BOT_GUIDE = """
    - كيف أتأكد أن ملفي وصل للدكتور فعلاً؟ بمجرد ظهور رسالة «تم تسليم واجبك» يُرسل البوت ملفك إلى قسم مجموعتك في مجتمع الدكتور، وعندما يضغط الدكتور زر الاستلام ستظهر لك شارة «استلمه الدكتور» في تفاصيل الواجب وفي قسم «تسليماتي».
    - نسيت بطاقتي الجامعية يوم المحاضرة النظرية، ماذا أفعل؟ افتح التطبيق المصغّر ← «شؤوني» ← «باركود بطاقتي» ← اضغط «إرسال صورة الباركود في البوت»، ثم اعرض الصورة من هاتفك للمندوب ليمسحها بجهاز التحضير.
 """
-def get_bot_guide() -> str:
-    ch = cohort.get()
-    return BOT_GUIDE.strip().format(
-        cohort_title=ch.title,
-        theory_groups=" أو ".join(ch.theory_ids()),
-        practical_range=f"G1 إلى G{len(ch.practical_ids())}",
+_BOT_GUIDE_TEMPLATE = BOT_GUIDE
+
+
+def get_bot_guide(cohort_ctx: Any = None) -> str:
+    if cohort_ctx is not None:
+        title = getattr(cohort_ctx, "title", DEFAULT_COHORT_TITLE)
+        theory = " أو ".join(cohort_ctx.theory_ids()) if hasattr(cohort_ctx, "theory_ids") else "المجموعات النظرية"
+        p_ids = cohort_ctx.practical_ids() if hasattr(cohort_ctx, "practical_ids") else []
+        practical_range = f"G1 إلى G{len(p_ids)}" if p_ids else "المجموعات العملية"
+    else:
+        title = DEFAULT_COHORT_TITLE
+        theory = "المجموعات النظرية لدفعتك"
+        practical_range = "المجموعات العملية لدفعتك"
+    return _BOT_GUIDE_TEMPLATE.strip().format(
+        cohort_title=title,
+        theory_groups=theory,
+        practical_range=practical_range,
     )
 
 
@@ -621,11 +633,11 @@ def _summarize_student_context(ctx: Mapping[str, Any], now: datetime) -> str:
     return "\n".join(lines)
 
 
-GENERIC_PREFIX = f"أهلاً بك في المساعد الذكي ل{cohort.get().title}"
+GENERIC_PREFIX = f"أهلاً بك في المساعد الذكي لبوت {DEFAULT_COHORT_TITLE}"
 
 # أنماط تدل على أن النص يحتوي بيانات خاصة بطالب بعينه — يُمنع تخزينها أو استرجاعها من الكاش المشترك (ai_cache)
 _PERSONAL_ANSWER_PATTERNS = re.compile(
-    r"(?:20\d{5,}|الرقم الأكاديمي\s*:|الطالب\s*:|ملخص واجباتك|ملخص حضورك|حالتك الحالية|" + re.escape(cohort.get().theory_prefix) + r"\d{1,2}\s*·\s*المجموعة العملية)",
+    r"(?:20\d{5,}|الرقم الأكاديمي\s*:|الطالب\s*:|ملخص واجباتك|ملخص حضورك|حالتك الحالية|[A-Z][A-Z0-9_]{0,12}G\d{1,2}\s*·\s*المجموعة العملية)",
     re.UNICODE,
 )
 
@@ -930,7 +942,7 @@ async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | N
 
     who = "طالب في الدفعة" if is_student else "زائر"
     sys_prompt = (
-        f"أنت المساعد الذكي لبوت وتطبيق {cohort.get().title}.\n"
+        f"أنت المساعد الذكي لبوت وتطبيق {DEFAULT_COHORT_TITLE}.\n"
         "أجب بالعربية في 3 جمل كحد أقصى بالاعتماد حصراً على (الدليل العملي الشامل للطالب) أدناه. لا تخترع معلومات.\n"
         "تنبيه خصوصية صارم: هذا رد عام مشترك للأسئلة المتكررة؛ يُمنع منعاً باتاً ذكر أي اسم طالب أو رقم أكاديمي أو مجموعة أو درجات أو حضور خاص بأي طالب.\n"
         "إن كان السؤال يطلب بيانات المستخدم الشخصية (واجباته/حضوره/مجموعته/تظلماته) فوجّهه لأقسام «الواجبات» و«شؤوني ← حضوري / تظلماتي / تسليماتي».\n"

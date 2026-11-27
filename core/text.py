@@ -27,16 +27,34 @@ def clean_name(text: str, max_len: int = 40) -> str | None:
     return cleaned
 
 
-def normalize_theory(value: object) -> str | None:
-    """'1' | 'G1' | 'cs2_g1' | 'CS2_G1' → 'CS2_G1' (حسب إعداد الدفعة في cohort.json)."""
-    from core import cohort
-    return cohort.get().normalize_theory(normalize_digits(str(value or "")).strip().upper().replace(" ", ""))
+def normalize_theory(
+    value: object,
+    *,
+    cohort_ctx: object | None = None,
+) -> str | None:
+    """'1' | 'G1' | 'cs2_g1' | 'CS2_G1' → رمز المجموعة النظرية ضمن الدفعة."""
+    cleaned = normalize_digits(str(value or "")).strip().upper().replace(" ", "")
+    if not cleaned:
+        return None
+    if cohort_ctx is None:
+        from core.scope import DEFAULT_COHORT_CONTEXT
+        cohort_ctx = DEFAULT_COHORT_CONTEXT
+    return cohort_ctx.normalize_theory(cleaned)
 
 
-def normalize_practical(value: object) -> str | None:
-    """'2' | 'G2' → 'G2' (حسب إعداد الدفعة في cohort.json)."""
-    from core import cohort
-    return cohort.get().normalize_practical(normalize_digits(str(value or "")).strip().upper().replace(" ", ""))
+def normalize_practical(
+    value: object,
+    *,
+    cohort_ctx: object | None = None,
+) -> str | None:
+    """'2' | 'G2' → 'G2' ضمن الدفعة."""
+    cleaned = normalize_digits(str(value or "")).strip().upper().replace(" ", "")
+    if not cleaned:
+        return None
+    if cohort_ctx is None:
+        from core.scope import DEFAULT_COHORT_CONTEXT
+        cohort_ctx = DEFAULT_COHORT_CONTEXT
+    return cohort_ctx.normalize_practical(cleaned)
 
 
 TG_MESSAGE_LIMIT = 4096

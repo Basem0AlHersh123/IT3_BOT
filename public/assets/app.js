@@ -60,13 +60,57 @@ const ls = {
 };
 const BOOT_KEY = `bs2:${UID}:boot`;
 const BOOT_TTL_MS = 300000; // دقيقتان لتفادي تكرار طلب bootstrap عند كل تنقل
-const prefs = Object.assign({ theme: 'auto', accent: 'green' }, ls.get('bs2:prefs'));
+const prefs = Object.assign({ theme: 'auto', accent: 'auto' }, ls.get('bs2:prefs'));
+const MAJOR_THEMES = {
+  it:       { accent: 'ocean',   preferDark: true,  glass: true },
+  cs:       { accent: 'green',   preferDark: false, glass: false },
+  cyber:    { accent: 'crimson', preferDark: true,  glass: true },
+  ai:       { accent: 'indigo',  preferDark: true,  glass: true },
+  graphics: { accent: 'rose',    preferDark: true,  glass: true },
+  is:       { accent: 'amber',   preferDark: true,  glass: true },
+  se:       { accent: 'emerald', preferDark: true,  glass: true },
+};
+const GLASS_ACCENTS = new Set(['ocean', 'crimson', 'indigo', 'rose', 'amber', 'emerald']);
+
+function detectMajorKey() {
+  const c = (typeof S !== 'undefined' && S.boot) ? (S.boot.active_cohort || S.boot.cohort || {}) : {};
+  const nodes = (typeof S !== 'undefined' && S.boot && S.boot.scope_tree) || [];
+  let code = '';
+  let majorName = '';
+  if (c.major && (c.major.code || c.major.name_ar)) {
+    code = String(c.major.code || '').toLowerCase();
+    majorName = String(c.major.name_ar || '');
+  } else if (c.parent_id) {
+    const m = nodes.find(n => n.id === c.parent_id && n.kind === 'major');
+    if (m) {
+      code = String(m.code || '').toLowerCase();
+      majorName = String(m.name_ar || '');
+    }
+  }
+  const text = `${code} ${majorName} ${c.code || ''} ${c.specialization || ''} ${c.title || ''}`.toLowerCase();
+  if (code === 'cs' || /علوم الحاسوب|computer science|\bcs\d*/.test(text)) return 'cs';
+  if (code === 'it' || /تقنية المعلومات|تكنولوجيا المعلومات|information tech|\bit\d*/.test(text)) return 'it';
+  if (code === 'cyber' || code === 'cybersecurity' || /cyber|سيبراني|أمن/.test(text)) return 'cyber';
+  if (code === 'ai' || /\bai\b|الذكاء الاصطناعي|artificial/.test(text)) return 'ai';
+  if (code === 'graphics' || /graphic|جرافيكس|الرسوم|وسائط/.test(text)) return 'graphics';
+  if (code === 'is' || /نظم المعلومات|information system|\bis\d+/.test(text)) return 'is';
+  if (code === 'se' || /هندسة البرمجيات|software eng|\bse\d*/.test(text)) return 'se';
+  return 'it';
+}
 
 function applyPrefs() {
   const d = document.documentElement;
+  const majorKey = detectMajorKey();
+  const mt = MAJOR_THEMES[majorKey] || MAJOR_THEMES.it;
   const sys = (tg && tg.colorScheme) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  d.dataset.theme = (prefs.theme === 'auto' ? sys : prefs.theme);
-  d.dataset.accent = prefs.accent;
+  const effAccent = (prefs.accent === 'auto' || !prefs.accent) ? mt.accent : prefs.accent;
+  const effTheme = prefs.theme === 'auto' ? (mt.preferDark ? 'dark' : sys) : prefs.theme;
+  const glass = GLASS_ACCENTS.has(effAccent) ? '1' : '0';
+  d.dataset.major = majorKey;
+  d.dataset.theme = effTheme;
+  d.dataset.accent = effAccent;
+  d.dataset.glass = glass;
+  ls.set('bs2:resolved_theme', { theme: effTheme, accent: effAccent, glass });
   try {
     const bg = getComputedStyle(d).getPropertyValue('--bg').trim();
     if (tg && bg) { tg.setHeaderColor(bg); tg.setBackgroundColor(bg); }
@@ -78,13 +122,21 @@ if (conn.saveData || /(^|-)2g$/.test(conn.effectiveType || '')) document.documen
 /* ---------- الحالة ---------- */
 const S = { boot: null, t: 0, stale: false, view: 'home', stack: [], flow: {}, loading: true, err: null };
 
-/* هوية الدفعة وتوزيع المجموعات تأتي من الخادم (cohort.json + جداول المجموعات) — لا أسماء ثابتة في الواجهة */
-const cohortInfo = () => (S.boot && S.boot.cohort) || {};
+/* هوية الدفعة وتوزيع المجموعات تأتي من شجرة النطاق في قاعدة البيانات — لا أسماء ثابتة في الواجهة */
+const cohortInfo = () => (S.boot && (S.boot.active_cohort || S.boot.cohort)) || {};
+const scopeTree = () => (S.boot && S.boot.scope_tree) || [];
+const availableCohorts = () => {
+  const nodes = scopeTree();
+  const majorsById = Object.fromEntries(nodes.filter(n => n.kind === 'major').map(n => [n.id, n]));
+  return nodes
+    .filter(n => n.kind === 'cohort' && n.is_active !== false)
+    .map(n => ({ ...n, major_name: (majorsById[n.parent_id] && majorsById[n.parent_id].name_ar) || '' }));
+};
 const theoryGroups = () => ((S.boot && S.boot.groups && S.boot.groups.theory) || []);
 const practicalGroups = () => ((S.boot && S.boot.groups && S.boot.groups.practical) || []).map(g => (typeof g === 'string' ? g : g.id));
 const firstTheory = () => theoryGroups()[0] || '';
 const firstPractical = () => practicalGroups()[0] || '';
-const cohortTitle = () => cohortInfo().title || 'الدفعة';
+const cohortTitle = () => cohortInfo().title || cohortInfo().name_ar || 'الكلية';
 const lockedMsg = () => 'هذه الميزة خاصة ب' + (cohortInfo().student_noun || 'طلاب الدفعة');
 
 /* ---------- الصلاحيات (الخادم هو الحَكَم، وهذا للإظهار فقط) ---------- */
@@ -113,13 +165,25 @@ const STAFF = [
   { id: 'a-dev',    t: 'لوحة المطوّر',  i: 'shield', perm: 'roles.manage' },
 ];
 const ALL = [...FEATURES, ...STAFF];
-const ROLE_AR = { delegate: 'مندوب', deputy: 'نائب مندوب', committee: 'لجنة علمية', developer: 'مطوّر' };
+const ROLE_AR = {
+  developer: 'مطوّر',
+  college_admin: 'مشرف الكلية',
+  major_admin: 'مشرف التخصص',
+  cohort_admin: 'مشرف الدفعة',
+  group_rep: 'مندوب مجموعة',
+  delegate: 'مندوب',
+  deputy: 'نائب مندوب',
+  committee: 'لجنة علمية',
+};
 const ACCENT_SWATCHES = [
-  ['green', '#1D5A44'],
-  ['teal', '#14625F'],
-  ['blue', '#24558F'],
-  ['violet', '#5B4496'],
-  ['yellow', '#D4A017'],
+  ['auto',    'conic-gradient(#0EA5E9,#1D5A44,#8B5CF6,#EF4444,#F59E0B,#0EA5E9)'],
+  ['ocean',   '#0EA5E9'],
+  ['green',   '#1D5A44'],
+  ['crimson', '#DC2626'],
+  ['indigo',  '#6366F1'],
+  ['rose',    '#DB2777'],
+  ['amber',   '#D97706'],
+  ['emerald', '#0D9488'],
 ];
 
 /* ---------- الشبكة ---------- */
@@ -189,6 +253,7 @@ async function refresh(force = false) {
   if (DEMO) {
     S.boot = demoBoot(DEMO);
     S.loading = false;
+    applyPrefs();
     render();
     handleInitialDeepLink();
     return BS.afterBoot && BS.afterBoot();
@@ -198,6 +263,7 @@ async function refresh(force = false) {
     S.boot = cached.data;
     S.t = cached.t || 0;
     S.loading = false;
+    applyPrefs();
     render();
     handleInitialDeepLink();
     /* إذا كانت البيانات حديثة (أقل من دقيقتين) ولم يُطلب تحديث قسري، لا نرسل طلب شبكة جديدًا */
@@ -222,6 +288,7 @@ async function refresh(force = false) {
       S.boot = r.data;
       S.t = Date.now();
       ls.set(BOOT_KEY, { data: r.data, etag: r.etag, t: S.t });
+      applyPrefs();
     } else if (r.status === 401) {
       S.err = 'unauth';
     } else {
@@ -386,8 +453,17 @@ function renderMore() {
   const seg = (key, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-act="pref" data-k="${key}" data-v="${v}" aria-pressed="${prefs[key] === v}">${l}</button>`).join('')}</div>`;
   const sw = ACCENT_SWATCHES
     .map(([v, c]) => `<button class="sw" style="background:${c}" data-act="pref" data-k="accent" data-v="${v}" aria-pressed="${prefs.accent === v}" aria-label="${v}">${ico('check')}</button>`).join('');
+  const cohorts = availableCohorts();
+  const canSwitch = cohorts.length > 1 && (u.kind === 'guest' || (b.roles || []).length > 0);
+  const activeId = (cohortInfo().id || u.active_cohort_node_id || 0);
+  const switcher = canSwitch
+    ? `<div class="sec">تبديل الدفعة</div><div class="card"><div class="scroll-x wrap">${cohorts.map(c =>
+        `<button class="btn ${c.id === activeId ? 'primary' : ''}" style="margin:4px 0" data-act="switch-cohort" data-id="${c.id}">${esc(c.major_name ? `${c.major_name} — ${c.name_ar}` : c.name_ar)}</button>`
+      ).join('')}</div></div>`
+    : '';
   return `<div class="card">${rows.map(([a, v]) => `<div class="row"><span>${a}</span><span>${v}</span></div>`).join('')}</div>
     ${u.kind === 'guest' ? '<button class="btn primary" style="margin-top:12px" data-act="flow-link">أنا طالب: ربط حسابي</button>' : ''}
+    ${switcher}
     <div class="sec">المظهر</div>
     <div class="card">${seg('theme', [['auto', 'تلقائي'], ['light', 'نهاري'], ['dark', 'ليلي']])}
       <div class="sec" style="margin-top:16px">اللون الأساسي</div><div class="swatches">${sw}</div></div>
@@ -539,8 +615,19 @@ function demoBoot(k) {
   }
 }
 
-const BS = window.BS = { S, tg, esc, ico, ls, prefs, applyPrefs, api, can, kind, go, back, tab, toast, render, refresh, actions, openBotDirect, lockedMsg, theoryGroups, practicalGroups, firstTheory, firstPractical, cohortTitle, cohortInfo, UID, DEMO, INIT, ACCENT_SWATCHES,
+async function switchCohort(cohortNodeId) {
+  try {
+    await api('/api/user/active-cohort', { method: 'POST', body: { cohort_node_id: Number(cohortNodeId) } });
+    toast('تم تبديل الدفعة ✅');
+    await refresh(true);
+  } catch (e) {
+    toast(e.status === 403 ? 'لا تملك صلاحية الوصول لهذه الدفعة' : 'تعذّر تبديل الدفعة');
+  }
+}
+
+const BS = window.BS = { S, tg, esc, ico, ls, prefs, applyPrefs, api, can, kind, go, back, tab, toast, render, refresh, actions, openBotDirect, lockedMsg, theoryGroups, practicalGroups, firstTheory, firstPractical, cohortTitle, cohortInfo, scopeTree, availableCohorts, switchCohort, UID, DEMO, INIT, ACCENT_SWATCHES,
   views: {}, titles: {}, routes: {}, tabMap: {} };
+actions['switch-cohort'] = el => switchCohort(el.dataset.id);
 setTimeout(() => { applyPrefs(); refresh(); }, 0);   // بعد تنفيذ features.js (defer بالترتيب)
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'all' }).catch(() => {});
 })();

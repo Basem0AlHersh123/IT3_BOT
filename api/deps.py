@@ -15,11 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import Header, HTTPException, Request, Response  # noqa: E402
 
 from core.config import load_settings  # noqa: E402
+from core.scope import ScopeResolver  # noqa: E402
 from core.store import Store  # noqa: E402
 from core.tg_auth import AuthError, TgUser, validate_init_data  # noqa: E402
 
 _settings = None
 _store: Store | None = None
+_scope_resolver: ScopeResolver | None = None
 _resolved_bot_username: str | None = None
 
 
@@ -36,6 +38,13 @@ def store() -> Store:
         s = settings()
         _store = Store(s.supabase_url, s.supabase_service_key, s.http_timeout)
     return _store
+
+
+def scope_resolver() -> ScopeResolver:
+    global _scope_resolver
+    if _scope_resolver is None:
+        _scope_resolver = ScopeResolver(store())
+    return _scope_resolver
 
 
 async def resolve_bot_username() -> str:

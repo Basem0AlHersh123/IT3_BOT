@@ -22,7 +22,6 @@ from core.attendance import build_attendance_xlsx
 from core.backup import BACKUP_TABLES, backup_caption, build_backup_parts
 from core.barcode import render_barcode_png
 from core.doctor import build_doctor_assignment_xlsx, build_doctor_group_xlsx
-from core import cohort
 from core.ratelimit import TokenBucket
 from core.reports import compile_weekly_report, study_week_start_date, weekly_report_days
 from core.sharek import build_sharek_xlsx
@@ -283,15 +282,36 @@ class Worker:
             return {**res, "status": "failed", "error": str(e)[:200]}
 
     # ---------- المجدول ----------
+    async def _all_theory_targets(self) -> list[tuple[str, int | None]]:
+        """يعيد [(theory_code, scope_node_id), ...] لكل المجموعات النظرية عبر جميع الدفعات."""
+        scopes = getattr(self.svc, "scopes", None)
+        if scopes is not None:
+            try:
+                cohorts = await scopes.list_cohorts()
+                targets = [(t.code, t.id) for c in cohorts for t in c.theory_nodes]
+                if targets:
+                    return targets
+            except Exception:  # noqa: BLE001
+                pass
+        rows = await self.svc.store.select("theory_groups", {"select": "id,scope_node_id", "order": "sort"})
+        return [(r["id"], r.get("scope_node_id")) for r in (rows or [])]
+
     async def _auto_weekly_reports(self, today_sanaa: dt.date) -> None:
         """ينشر التقرير الأسبوعي آليًا (مساء الخميس، ويُستدرك الجمعة إن فات) في topic كل مجموعة نظرية مرة واحدة.
         كل مجموعة معزولة عن غيرها: فشل إحداها لا يوقف البقية، والمنشور سابقًا لا يتكرر."""
         wstart = study_week_start_date(today_sanaa)
-        for grp in cohort.get().theory_ids():
-            if (grp, wstart.isoformat()) in self._weekly_done:
+        for grp, node_id in await self._all_theory_targets():
+            done_key = (str(node_id or grp), wstart.isoformat())
+            if done_key in self._weekly_done:
                 continue
             try:
-                dest = await self.svc.destination(f"cohort:theory:{grp}") or await self.svc.destination(f"cohort:notices:{grp}")
+                if node_id is not None:
+                    dest = (
+                        await self.svc.destination(f"cohort:theory:{grp}", scope_node_id=node_id)
+                        or await self.svc.destination(f"cohort:notices:{grp}", scope_node_id=node_id)
+                    )
+                else:
+                    dest = await self.svc.destination(f"cohort:theory:{grp}") or await self.svc.destination(f"cohort:notices:{grp}")
                 if not dest:
                     continue   # لا وجهة بعد؛ نعاود لاحقًا ضمن النافذة دون استعلامات إضافية
                 existing = await self.svc.store.select(
@@ -299,7 +319,7 @@ class Worker:
                     {"select": "id,status,rendered_text", "theory_group_id": f"eq.{grp}", "week_start": f"eq.{wstart.isoformat()}"},
                 )
                 if existing and existing[0].get("status") == "published":
-                    self._weekly_done.add((grp, wstart.isoformat()))
+                    self._weekly_done.add(done_key)
                     continue
                 if existing and existing[0].get("rendered_text"):
                     text = existing[0]["rendered_text"]
@@ -314,7 +334,7 @@ class Worker:
                         },
                     )
                     if not weekly_report_days(wstart, daily):
-                        self._weekly_done.add((grp, wstart.isoformat()))
+                        self._weekly_done.add(done_key)
                         continue   # لا تقارير مكتوبة هذا الأسبوع: لا ننشر تقريرًا أسبوعيًا فارغًا
                     first = await self.svc.store.select(
                         "daily_reports", {"select": "report_date", "order": "report_date.asc", "limit": "1"})
@@ -322,10 +342,10 @@ class Worker:
                     text = compile_weekly_report(grp, wstart, daily, first_report_date=first_date)
                 await self.svc.store.rpc("enqueue_outbox", {
                     "p_kind": "weekly_report_post", "p_chat": dest["chat_id"], "p_topic": dest.get("topic_id"),
-                    "p_payload": {"group": grp, "week_start": wstart.isoformat(), "text": text},
-                    "p_dedupe": f"auto_wrep:{grp}:{wstart.isoformat()}",
+                    "p_payload": {"group": grp, "scope_node_id": node_id, "week_start": wstart.isoformat(), "text": text},
+                    "p_dedupe": f"auto_wrep:{node_id or grp}:{wstart.isoformat()}",
                 })
-                self._weekly_done.add((grp, wstart.isoformat()))
+                self._weekly_done.add(done_key)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

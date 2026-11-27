@@ -19,8 +19,7 @@ from fastapi.responses import JSONResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 
-from api.deps import build_bot_link, current_user, etag_response, settings, store
-from core import cohort
+from api.deps import build_bot_link, current_user, etag_response, scope_resolver, settings, store
 from core.doctor import build_doctor_assignment_xlsx, build_doctor_group_xlsx
 from core.files import file_title, hashtag
 from core.mcq import build_mcq_template_xlsx, parse_mcq_excel
@@ -870,24 +869,38 @@ class TeachingUpsertIn(BaseModel):
     group: str | None = Field(default=None, max_length=16)
     groups: list[str] = Field(default_factory=list)
     doctor_id: int
+    cohort_node_id: int | None = None
 
 
 @router.post("/dev/teaching")
 async def dev_teaching_upsert(body: TeachingUpsertIn, user: TgUser = Depends(current_user)) -> JSONResponse:
     """يربط الدكتور بالمادة لمجموعة واحدة أو عدة مجموعات أو «الكل» بضغطة واحدة."""
+    cohort_ctx = None
+    if body.cohort_node_id is not None:
+        cohort_ctx = await scope_resolver().get_cohort(body.cohort_node_id)
+    else:
+        cohorts = await scope_resolver().list_cohorts()
+        cohort_ctx = cohorts[0] if cohorts else None
+
     raw_groups = list(body.groups)
     if body.group:
         raw_groups.append(body.group)
     if not raw_groups or "ALL" in raw_groups:
+        if cohort_ctx is None:
+            raise HTTPException(422, "invalid_cohort")
         target_groups = (
-            cohort.get().theory_ids()
+            cohort_ctx.theory_ids()
             if body.part == "theory"
-            else cohort.get().practical_ids()
+            else cohort_ctx.practical_ids()
         )
     else:
         target_groups = []
         for g in raw_groups:
-            norm = normalize_theory(g) if body.part == "theory" else normalize_practical(g)
+            norm = (
+                normalize_theory(g, cohort_ctx=cohort_ctx)
+                if body.part == "theory"
+                else normalize_practical(g, cohort_ctx=cohort_ctx)
+            )
             if not norm:
                 raise HTTPException(422, "invalid_group")
             if norm not in target_groups:

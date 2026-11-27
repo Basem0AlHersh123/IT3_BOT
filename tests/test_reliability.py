@@ -123,6 +123,8 @@ class WorkerSchedulingTests(unittest.TestCase):
         store = FakeStore({"enqueue_outbox": True})
 
         async def select(table, params=None):
+            if table == "theory_groups":
+                return [{"id": f"CS2_G{i}"} for i in (1, 2, 3)]
             if table == "daily_reports":
                 return [{"report_date": "2026-10-25", "rendered_text": "📌 تقرير الأحد\n• محاضرة"}]
             return []

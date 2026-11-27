@@ -92,8 +92,17 @@ class Store:
         return await self._request("GET", f"/{table}", params=params or {})
 
     # ---- اختصارات للمرحلة 1 ----
-    async def bootstrap(self, tg_id: int, name: str | None, username: str | None) -> dict[str, Any]:
-        return await self.rpc("app_bootstrap", {"p_tg": tg_id, "p_name": name, "p_username": username})
+    async def bootstrap(
+        self,
+        tg_id: int,
+        name: str | None,
+        username: str | None,
+        cohort_node_id: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"p_tg": tg_id, "p_name": name, "p_username": username}
+        if cohort_node_id is not None:
+            params["p_cohort_node_id"] = cohort_node_id
+        return await self.rpc("app_bootstrap", params)
 
     async def versions(self) -> dict[str, int]:
         rows = await self.select("data_versions", {"select": "scope,version"})
@@ -107,3 +116,82 @@ class Store:
 
     async def register_guest(self, tg_id: int, name: str, username: str | None) -> dict[str, Any]:
         return await self.rpc("register_guest", {"p_tg": tg_id, "p_name": name, "p_username": username})
+
+    # ---- شجرة النطاق ومنح الأدوار بنطاق (Phase C) ----
+    async def list_scope_nodes(self) -> list[dict[str, Any]]:
+        return await self.select(
+            "scope_nodes",
+            {
+                "select": "id,kind,parent_id,code,name_ar,path,meta,sort,is_active",
+                "deleted_at": "is.null",
+                "order": "sort,id",
+            },
+        )
+
+    async def list_scope_tree(self, actor_id: int, root_id: int | None = None) -> list[dict[str, Any]]:
+        return await self.rpc("list_scope_tree", {"p_actor": actor_id, "p_root_id": root_id})
+
+    async def create_scope_node(
+        self,
+        actor_id: int,
+        parent_id: int | None,
+        kind: str,
+        code: str,
+        name_ar: str,
+        meta: dict[str, Any] | None = None,
+        sort: int = 0,
+    ) -> dict[str, Any]:
+        return await self.rpc(
+            "create_scope_node",
+            {
+                "p_actor": actor_id,
+                "p_parent_id": parent_id,
+                "p_kind": kind,
+                "p_code": code,
+                "p_name_ar": name_ar,
+                "p_meta": meta or {},
+                "p_sort": sort,
+            },
+        )
+
+    async def update_scope_node(
+        self,
+        actor_id: int,
+        node_id: int,
+        *,
+        name_ar: str | None = None,
+        meta: dict[str, Any] | None = None,
+        sort: int | None = None,
+        is_active: bool | None = None,
+    ) -> dict[str, Any]:
+        return await self.rpc(
+            "update_scope_node",
+            {
+                "p_actor": actor_id,
+                "p_node_id": node_id,
+                "p_name_ar": name_ar,
+                "p_meta": meta,
+                "p_sort": sort,
+                "p_is_active": is_active,
+            },
+        )
+
+    async def set_active_cohort(self, tg_id: int, cohort_node_id: int) -> dict[str, Any]:
+        return await self.rpc("set_active_cohort", {"p_tg": tg_id, "p_cohort_node_id": cohort_node_id})
+
+    async def grant_role_scoped(
+        self,
+        actor_id: int,
+        target_id: int,
+        role: str,
+        scope_node_id: int | None = None,
+    ) -> dict[str, Any]:
+        return await self.rpc(
+            "grant_role_scoped",
+            {
+                "p_actor": actor_id,
+                "p_target": target_id,
+                "p_role": role,
+                "p_scope_node_id": scope_node_id,
+            },
+        )

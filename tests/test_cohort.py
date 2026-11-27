@@ -72,21 +72,23 @@ class OtherCohortTests(unittest.TestCase):
         self.assertEqual(c.title, "دفعة هندسة البرمجيات 27")
 
     def test_normalization_follows_config(self):
-        self.assertEqual(normalize_theory("4"), "SE1_G4")
-        self.assertEqual(normalize_theory("se1_g2"), "SE1_G2")
-        self.assertIsNone(normalize_theory("5"))
-        self.assertIsNone(normalize_theory("CS2_G1"))
-        self.assertEqual(normalize_practical("10"), "G10")
-        self.assertIsNone(normalize_practical("11"))
+        c = cohort.get()
+        self.assertEqual(normalize_theory("4", cohort_ctx=c), "SE1_G4")
+        self.assertEqual(normalize_theory("se1_g2", cohort_ctx=c), "SE1_G2")
+        self.assertIsNone(normalize_theory("5", cohort_ctx=c))
+        self.assertIsNone(normalize_theory("CS2_G1", cohort_ctx=c))
+        self.assertEqual(normalize_practical("10", cohort_ctx=c), "G10")
+        self.assertIsNone(normalize_practical("11", cohort_ctx=c))
 
     def test_assignment_validation_follows_config(self):
+        c = cohort.get()
         now = datetime(2026, 9, 1, tzinfo=timezone.utc)
         due = (now + timedelta(days=2)).strftime("%Y-%m-%d 20:00")
-        ok, err = validate_assignment_meta({"subject_id": 1, "part": "theory", "group": "SE1_G4", "due_local": due}, now)
+        ok, err = validate_assignment_meta({"subject_id": 1, "part": "theory", "group": "SE1_G4", "due_local": due}, now, cohort_ctx=c)
         self.assertIsNone(err)
-        _, err = validate_assignment_meta({"subject_id": 1, "part": "theory", "group": "CS2_G1", "due_local": due}, now)
+        _, err = validate_assignment_meta({"subject_id": 1, "part": "theory", "group": "CS2_G1", "due_local": due}, now, cohort_ctx=c)
         self.assertEqual(err, "invalid_group")
-        ok, err = validate_assignment_meta({"subject_id": 1, "part": "practical", "group": "G10", "due_local": due}, now)
+        ok, err = validate_assignment_meta({"subject_id": 1, "part": "practical", "group": "G10", "due_local": due}, now, cohort_ctx=c)
         self.assertIsNone(err)
 
     def test_public_payload_for_mini_app(self):

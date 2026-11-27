@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from core.cache import VersionedCache
 from core.config import load_settings
+from core.scope import ScopeResolver
 from core.store import Store
 
 log = logging.getLogger("bot")
@@ -20,6 +21,7 @@ class Services:
     def __init__(self) -> None:
         self.settings = load_settings()
         self.store = Store(self.settings.supabase_url, self.settings.supabase_service_key, self.settings.http_timeout)
+        self.scopes = ScopeResolver(self.store)
         self.cache = VersionedCache(ttl=600)
         self.developer_contact = os.getenv("DEVELOPER_CONTACT", "").strip() or None
         self._watcher: asyncio.Task | None = None
@@ -48,19 +50,26 @@ class Services:
     def forget(self, tg_id: int) -> None:
         self.cache.invalidate(f"p:{tg_id}")
 
-    async def destination(self, key: str) -> dict[str, Any] | None:
-        """مجتمع/topic مسجَّل (chat_id, topic_id) أو None."""
+    async def destination(self, key: str, *, scope_node_id: int | None = None) -> dict[str, Any] | None:
+        """مجتمع/topic مسجَّل (chat_id, topic_id) معزول حسب عقدة النطاق أو None."""
+        cache_key = f"d:{scope_node_id}:{key}" if scope_node_id is not None else f"d:{key}"
+
         async def load() -> dict[str, Any] | None:
-            rows = await self.store.select("tg_destinations", {"select": "chat_id,topic_id", "key": f"eq.{key}"})
+            params: dict[str, str] = {"select": "chat_id,topic_id,scope_node_id", "key": f"eq.{key}"}
+            if scope_node_id is not None:
+                params["scope_node_id"] = f"eq.{int(scope_node_id)}"
+            rows = await self.store.select("tg_destinations", params)
             return rows[0] if rows else None
 
-        return await self.cache.get_or_load(f"d:{key}", "destinations", load)
+        return await self.cache.get_or_load(cache_key, "destinations", load)
 
     async def _watch_versions(self) -> None:
         while True:
             try:
                 changed = self.cache.update_versions(await self.store.versions())
                 if changed:
+                    if "scopes" in changed:
+                        self.scopes.invalidate()
                     log.info("versions changed: %s", changed)
             except Exception as exc:  # noqa: BLE001 — المراقب لا يجوز أن يسقط
                 log.warning("version poll failed: %s", exc)

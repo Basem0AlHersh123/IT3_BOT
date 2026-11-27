@@ -19,10 +19,10 @@ from telegram.ext import ContextTypes
 from bot.locks import per_user
 from bot.media import send_by_kind
 from bot.services import Services, svc
+from bot.texts import LOCKED_MSG
 from bot.ui import btn, kb, say
 from core.mcq import MCQ_EXCEL_COLUMNS, parse_mcq_excel
 from core.permissions import can
-from core import cohort
 
 log = logging.getLogger("phase4")
 
@@ -176,7 +176,7 @@ async def on_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[
     chat, tg = update.effective_chat.id, update.effective_user.id
     perms = prof.get("perms") or []
     if not can(perms, "sharek.participate"):
-        return await say(bot, chat, f"هذه الميزة خاصة ب{cohort.get().students_noun}")
+        return await say(bot, chat, LOCKED_MSG)
 
     if parts[0] == "m" and len(parts) > 1 and parts[1] == "sharek":
         return await show_sharek_list(bot, s, chat, tg)

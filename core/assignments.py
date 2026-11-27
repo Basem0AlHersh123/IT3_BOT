@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Mapping
 
-from core import cohort
+from core.scope import DEFAULT_COHORT_CONTEXT, CohortContext
 from core.timeutil import UTC, parse_sanaa
 
 STATUS_AR = {"open": "مفتوح", "submitted": "مسلَّم", "late": "متأخر", "missed": "فاته"}
@@ -35,17 +35,25 @@ def can_submit(now: datetime, a: Mapping[str, Any]) -> bool:
 
 
 
-def validate_assignment_meta(meta: Mapping[str, Any], now: datetime) -> tuple[dict[str, Any] | None, str | None]:
+def validate_assignment_meta(
+    meta: Mapping[str, Any],
+    now: datetime,
+    *,
+    cohort_ctx: CohortContext | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
     try:
         subject_id = int(meta.get("subject_id"))
     except (TypeError, ValueError):
         return None, "invalid_subject"
-    part, group = meta.get("part"), str(meta.get("group") or "")
-    if part == "theory" and not cohort.get().is_theory(group):
-        return None, "invalid_group"
-    if part == "practical" and not cohort.get().is_practical(group):
-        return None, "invalid_group"
-    if part not in ("theory", "practical"):
+    ctx = cohort_ctx if cohort_ctx is not None else DEFAULT_COHORT_CONTEXT
+    part, group = meta.get("part"), str(meta.get("group") or "").strip().upper()
+    if part == "theory":
+        if not ctx.is_theory(group):
+            return None, "invalid_group"
+    elif part == "practical":
+        if not ctx.is_practical(group):
+            return None, "invalid_group"
+    else:
         return None, "invalid_part"
     try:
         due = parse_sanaa(str(meta.get("due_local") or ""))

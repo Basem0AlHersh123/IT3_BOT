@@ -12,7 +12,6 @@ from typing import Any, Mapping
 from xml.sax.saxutils import escape as xml_escape
 
 from core.text import normalize_academic_no, normalize_theory
-from core import cohort
 
 MAX_LECTURES = 12
 
@@ -179,7 +178,7 @@ def _build_xlsx_minimal(sheet_title: str, rows: list[list[Any]]) -> bytes:
 def build_attendance_xlsx(matrix: Mapping[str, Any]) -> bytes:
     """يبني ملف Excel (RTL) لحضور المادة (الرقم الأكاديمي، الاسم، م1–م12، الحضور، الغياب، النسبة)."""
     subject_name = (matrix.get("subject") or {}).get("name") or "المادة"
-    group = matrix.get("group") or cohort.get().theory_ids()[0]
+    group = matrix.get("group") or "المجموعة"
     headers = ["الرقم الأكاديمي", "الاسم", *[f"م{i}" for i in range(1, MAX_LECTURES + 1)], "الحضور", "الغياب", "النسبة %"]
     table_rows: list[list[Any]] = [headers]
 

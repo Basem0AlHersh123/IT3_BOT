@@ -89,13 +89,17 @@ class BuildTests(unittest.TestCase):
 
     def test_tables_match_migrations(self):
         created = set()
-        for f in glob.glob(str(ROOT / "supabase/migrations/*.sql")):
-            created |= set(re.findall(r"create table if not exists\s+([a-z_0-9]+)", Path(f).read_text("utf8"), re.I))
+        latest_arr = None
+        for f in sorted(glob.glob(str(ROOT / "supabase/migrations/*.sql"))):
+            sql = Path(f).read_text("utf8")
+            created |= set(re.findall(r"create table if not exists\s+([a-z_0-9]+)", sql, re.I))
+            m = re.search(r"create or replace function backup_tables\(\).*?select array\[(.*?)\];", sql, re.S | re.I)
+            if m:
+                latest_arr = m.group(1)
         expected = created - {"outbox", "ai_cache", "backup_runs"}
         self.assertEqual(set(BACKUP_TABLES), expected)
-        sql = (ROOT / "supabase/migrations/0010_backup.sql").read_text("utf8")
-        arr = re.search(r"select array\[(.*?)\];", sql, re.S).group(1)
-        self.assertEqual(re.findall(r"'([a-z_0-9]+)'", arr), BACKUP_TABLES)   # نفس الترتيب في SQL وبايثون
+        self.assertIsNotNone(latest_arr)
+        self.assertEqual(re.findall(r"'([a-z_0-9]+)'", latest_arr), BACKUP_TABLES)   # نفس الترتيب في SQL وبايثون
 
 
 class SchedulerTests(unittest.TestCase):

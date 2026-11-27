@@ -29,7 +29,6 @@ from bot.locks import per_user
 from bot.services import Services, svc
 from bot.ui import btn, kb, kb_confirm, kb_entry, kb_menu, say, webapp_btn
 from bot.worker import Worker
-from core import cohort
 from core.config import load_settings
 from core.flood import NOTICE, OK, FloodGuard
 from core.permissions import can
@@ -362,11 +361,13 @@ async def on_where_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
             rows.append([btn("🔙 رجوع", "wh:back")])
             return await q.edit_message_reply_markup(kb(rows))
         if kind == "not":
-            rows = [[btn(f"📣 إعلانات وواجبات {g}", f"wh:set:not:{g}")] for g in cohort.get().theory_ids()]
+            theory_ids = (prof.get("groups") or {}).get("theory") or []
+            rows = [[btn(f"📣 إعلانات وواجبات {g}", f"wh:set:not:{g}")] for g in theory_ids]
             rows.append([btn("🔙 رجوع", "wh:back")])
             return await q.edit_message_reply_markup(kb(rows))
         if kind == "rep":
-            rows = [[btn(f"📌 تقارير {g}", f"wh:set:rep:{g}")] for g in cohort.get().theory_ids()]
+            theory_ids = (prof.get("groups") or {}).get("theory") or []
+            rows = [[btn(f"📌 تقارير {g}", f"wh:set:rep:{g}")] for g in theory_ids]
             rows.append([btn("🔙 رجوع", "wh:back")])
             return await q.edit_message_reply_markup(kb(rows))
         if kind == "doc":
@@ -380,10 +381,14 @@ async def on_where_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts:
 
     if action == "doc":
         doc_id = int(parts[2])
-        ch = cohort.get()
-        rows = [[btn(f"نظري {g}", f"wh:set:doc:{doc_id}:theory:{g}") for g in ch.theory_ids()]]
-        for t in ch.theory_ids():       # صف عملي لكل مجموعة نظرية (أي عدد مجموعات/عملي)
-            rows.append([btn(f"عملي {g}", f"wh:set:doc:{doc_id}:practical:{g}") for g in ch.practical_of(t)])
+        groups = prof.get("groups") or {}
+        theory_ids = groups.get("theory") or []
+        practical_list = groups.get("practical") or []
+        rows = [[btn(f"نظري {g}", f"wh:set:doc:{doc_id}:theory:{g}") for g in theory_ids]] if theory_ids else []
+        for t in theory_ids:
+            p_codes = [p["id"] for p in practical_list if p.get("theory") == t]
+            if p_codes:
+                rows.append([btn(f"عملي {g}", f"wh:set:doc:{doc_id}:practical:{g}") for g in p_codes])
         rows.append([btn("🔙 رجوع", "wh:m:doc")])
         return await q.edit_message_reply_markup(kb(rows))
 

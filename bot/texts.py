@@ -1,13 +1,13 @@
 """نصوص البوت (عربي فقط). قصيرة عمدًا، وكلها تُرسل كرسائل جديدة."""
 from html import escape
-from core import cohort
 
-LOCKED_MSG = f"هذه الميزة خاصة ب{cohort.get().student_noun}"
+LOCKED_MSG = "هذه الميزة خاصة بطلاب الدفعة."
 
 
-def welcome_new(name: str) -> str:
+def welcome_new(name: str, cohort_title: str | None = None) -> str:
+    title = cohort_title or "البوت الأكاديمي للكلية"
     return (f"أهلًا {escape(name)} 👋\n"
-            f"هذا بوت {cohort.get().title}: الملفات والواجبات والحضور وكل ما يخص الدفعة.\n\n"
+            f"هذا {escape(title)}: الملفات والواجبات والحضور وكل ما يخص الدراسة.\n\n"
             "كيف تريد الدخول؟")
 
 

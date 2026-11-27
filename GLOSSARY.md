@@ -96,28 +96,32 @@ _Avoid_: Message queue, notification buffer, job queue
 An append-only audit trail recording who performed sensitive administrative or academic actions and on which entity.
 _Avoid_: Audit log, history, event log
 
-### Multi-Tenancy (Planned)
+### Multi-Tenancy
 
-**Tenant Scope Node** *(عقدة النطاق — planned)*:
+**Tenant Scope Node** *(عقدة النطاق)*:
 A single node in the **Scope Tree** representing a **College**, **Major**, **Cohort**, **Theory Group**, or **Practical Group** that owns data or limits access.
 _Avoid_: Tenant, org unit, namespace
 
-**Scope Tree** *(شجرة النطاق — planned)*:
+**Scope Tree** *(شجرة النطاق)*:
 The five-level hierarchy `College → Major → Cohort → Theory Group → Practical Group` used to isolate tenant data and inherit administrative powers downward.
 _Avoid_: Org chart, hierarchy, tenant tree
 
-**Scoped Role Grant** *(منحة دور بنطاق — planned)*:
+**Scoped Role Grant** *(منحة دور بنطاق)*:
 A **Role Grant** bound to a specific **Tenant Scope Node**; powers inherit to all descendant nodes, and one **User** may hold multiple grants.
 _Avoid_: Regional role, nested permission, scoped admin
 
-**College Admin** *(مشرف الكلية — planned)*:
+**College Admin** *(مشرف الكلية)*:
 A **User** holding a **Scoped Role Grant** at the **College** node, with management authority across all **Majors** and **Cohorts**.
 _Avoid_: Superadmin, global admin, root
 
-**Cohort Admin** *(مشرف الدفعة — planned)*:
-A **User** holding a **Scoped Role Grant** at a **Cohort** node (such as IT Level 3), managing only that **Cohort** and its groups.
-_Avoid_: Major admin, year admin, sub-admin
+**Major Admin** *(مشرف التخصص)*:
+A **User** holding a **Scoped Role Grant** at a **Major** node (such as Information Technology), with management authority across all **Cohorts** and groups within that **Major**.
+_Avoid_: Department head, track admin, branch admin
 
-**Group Rep** *(مندوب المجموعة — planned)*:
+**Cohort Admin** *(مشرف الدفعة)*:
+A **User** holding a **Scoped Role Grant** at a **Cohort** node (such as IT Level 3), managing only that **Cohort** and its groups.
+_Avoid_: Year admin, sub-admin
+
+**Group Rep** *(مندوب المجموعة)*:
 A **User** holding a **Scoped Role Grant** at a **Theory Group** or **Practical Group** node, managing only their assigned group.
 _Avoid_: Class rep, leader, sub-delegate

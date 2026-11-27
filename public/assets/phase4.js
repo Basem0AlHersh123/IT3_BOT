@@ -11,7 +11,40 @@ const B = window.BS, S = B.S, P = S.p2, esc = B.esc, ico = B.ico, can = B.can, s
 const PART = { theory: 'نظري', practical: 'عملي' };
 const STUDY_DAYS = [[5, 'السبت'], [6, 'الأحد'], [0, 'الاثنين'], [1, 'الثلاثاء'], [2, 'الأربعاء'], [3, 'الخميس']];
 const ORDINALS = ['الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة'];
-const ROLE_LABELS = { delegate: 'مندوب', deputy: 'نائب مندوب', committee: 'لجنة علمية', developer: 'مطوّر' };
+const ROLE_LABELS = {
+  developer: 'مطوّر',
+  college_admin: 'مشرف الكلية',
+  major_admin: 'مشرف التخصص',
+  cohort_admin: 'مشرف الدفعة',
+  group_rep: 'مندوب مجموعة',
+  delegate: 'مندوب',
+  deputy: 'نائب مندوب',
+  committee: 'لجنة علمية',
+};
+const SCOPE_KIND_LABELS = {
+  college: 'الكلية',
+  major: 'تخصص',
+  cohort: 'دفعة / مستوى',
+  theory_group: 'مجموعة نظرية',
+  practical_group: 'مجموعة عملية',
+};
+const SCOPE_PARENT_KIND = {
+  college: null,
+  major: 'college',
+  cohort: 'major',
+  theory_group: 'cohort',
+  practical_group: 'theory_group',
+};
+const ROLE_ALLOWED_KINDS = {
+  developer: [],
+  college_admin: ['college'],
+  major_admin: ['major'],
+  cohort_admin: ['cohort'],
+  delegate: ['cohort', 'theory_group'],
+  committee: ['cohort', 'theory_group'],
+  deputy: ['theory_group', 'practical_group'],
+  group_rep: ['theory_group', 'practical_group'],
+};
 
 const ICON_X = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg>';
 const ICON_TICK = '<svg viewBox="0 0 14 14" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5l3 3 6-7"/></svg>';
@@ -80,7 +113,9 @@ const P4 = S.p4 = {
   ntf: { group: '', title: '', body: '', busy: false, err: '' },
   dev: {
     tab: 'students', ov: null, students: null, stuGroup: '', stuQ: '', stuForm: null, guests: null, cat: null,
-    roleForm: { telegram_id: '', role: 'delegate', group: '' },
+    scopes: null, scopedRoles: null,
+    scopeForm: { kind: 'major', parent_id: '', code: '', name_ar: '', batch: '', level: '', theory_prefix: '' },
+    roleForm: { telegram_id: '', role: 'cohort_admin', scope_node_id: '', group: '' },
     subjForm: { name_ar: '', hashtag: '' },
     docForm: { name: '', telegram_id: '' },
     teachForm: { subject_id: '', part: 'theory', groups: [], doctor_id: '' },
@@ -1060,13 +1095,24 @@ B.views['notify-send'] = () => {
 
 function loadDevSub(sub, force = false) {
   const dv = P4.dev;
-  if (sub === 'students') {
+  if (sub === 'scopes') {
+    swr('dev-scopes', '/api/scopes/tree', d => {
+      if (d && d.nodes) { dv.scopes = d.nodes; rerender(); }
+    }, force);
+  } else if (sub === 'students') {
     swr('dev-ov', '/api/dev/overview', d => { if (d) { dv.ov = d; rerender(); } }, force);
     const q = `group=${dv.stuGroup}&q=${encodeURIComponent(dv.stuQ || '')}`;
     swr(`dev-stu:${q}`, `/api/dev/students?${q}`, d => { dv.students = d || []; rerender(); }, force);
   } else if (sub === 'guests') {
     swr('dev-guests', '/api/dev/guests', d => { dv.guests = d || []; rerender(); }, force);
-  } else if (sub === 'roles' || sub === 'catalog') {
+  } else if (sub === 'roles') {
+    swr('dev-scopes', '/api/scopes/tree', d => {
+      if (d && d.nodes) { dv.scopes = d.nodes; rerender(); }
+    }, force);
+    swr('dev-scoped-roles', '/api/admin/roles', d => {
+      if (d && Array.isArray(d.roles)) { dv.scopedRoles = d.roles; rerender(); }
+    }, force);
+  } else if (sub === 'catalog') {
     swr('dev-cat', '/api/dev/catalog', d => {
       if (d) {
         dv.cat = d;
@@ -1109,22 +1155,44 @@ function computeDestKeyAndLabel(ui, cat) {
   return { key: `doctor:${d.id}:${ui.part}:${g}`, label: `تسليمات ${d.name} (${PART[ui.part]} ${g})` };
 }
 
-/* شاشة لوحة المطوّر الرئيسية: تعرض البطاقات فقط كما في الشاشة الرئيسية */
+function scopePathLabel(node, byId) {
+  const parts = [];
+  let cur = node;
+  while (cur) {
+    parts.unshift(cur.name_ar || cur.code);
+    cur = cur.parent_id ? byId[cur.parent_id] : null;
+  }
+  return parts.join(' ← ');
+}
+
+/* شاشة لوحة المطوّر الرئيسية: تعرض مبدّل الدفعة والبطاقات */
 B.views.dev = () => {
   const tiles = [
+    ['scopes', 'الكلية والدفعات', 'folder'],
+    ['roles', 'الأدوار', 'shield'],
     ['students', 'الطلاب', 'idcard'],
     ['guests', 'الزوار والحظر', 'lock'],
-    ['roles', 'الأدوار', 'shield'],
-    ['catalog', 'المواد والمجتمعات', 'folder'],
+    ['catalog', 'المواد والمجتمعات', 'tasks'],
     ['trash', 'السلة', 'tasks'],
     ['activity', 'سجل النشاط', 'report'],
     ['health', 'صحة النظام', 'bell'],
   ];
+  const cohorts = B.availableCohorts ? B.availableCohorts() : [];
+  const activeId = (B.cohortInfo && B.cohortInfo().id) || 0;
+  const switcher = cohorts.length > 1
+    ? `<div class="card" style="margin-bottom:12px">
+        <div class="sec" style="margin-top:0">النطاق / الدفعة النشطة</div>
+        <div class="scroll-x wrap">${cohorts.map(c =>
+          `<button class="btn sm ${c.id === activeId ? 'primary' : ''}" style="width:auto;margin:3px 0" data-act="switch-cohort" data-id="${c.id}">${esc(c.major_name ? `${c.major_name} · ${c.name_ar}` : c.name_ar)}</button>`
+        ).join('')}</div>
+      </div>`
+    : '';
   return `<section class="hero" style="padding:18px 18px 34px;margin-bottom:14px">
       <small>إدارة النظام الشاملة</small>
       <h2 style="font-size:22px;margin:4px 0 8px">لوحة المطوّر</h2>
-      <div class="chips"><span class="chip">صلاحيات كاملة</span><span class="chip">${esc(B.cohortTitle())}</span></div>
+      <div class="chips"><span class="chip">إدارة متعددة الدفعات</span><span class="chip">${esc(B.cohortTitle())}</span></div>
     </section>
+    ${switcher}
     <div class="sec">اختر القسم المطلوب</div>
     <div class="grid">${tiles.map(([k, l, icon]) =>
       `<button class="tile" data-act="dev-open" data-v="${k}">${ico(icon)}<span>${esc(l)}</span></button>`
@@ -1134,6 +1202,57 @@ B.views.dev = () => {
 /* الشاشة الكاملة المستقلة لكل قسم في لوحة المطوّر */
 B.views['dev-view'] = sub => {
   const dv = P4.dev, ov = dv.ov;
+
+  if (sub === 'scopes') {
+    const nodes = dv.scopes || (B.scopeTree ? B.scopeTree() : null);
+    if (!nodes) return skel(4);
+    const sf = dv.scopeForm;
+    const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+    const needParentKind = SCOPE_PARENT_KIND[sf.kind];
+    const parentPool = needParentKind ? nodes.filter(n => n.kind === needParentKind && n.is_active !== false) : [];
+    if (needParentKind && parentPool.length && !parentPool.some(p => String(p.id) === String(sf.parent_id))) {
+      sf.parent_id = String(parentPool[0].id);
+    }
+    const activeCohortId = (B.cohortInfo && B.cohortInfo().id) || 0;
+    const depthOf = n => (Array.isArray(n.path) && n.path.length ? n.path.length - 1 : 0);
+
+    return `<div class="card" style="margin-bottom:12px">
+        <b>إضافة تخصص / دفعة / مجموعة جديدة</b>
+        <div class="two" style="margin-top:8px">
+          <select class="field" data-f4="devScope.kind">
+            <option value="major" ${sf.kind === 'major' ? 'selected' : ''}>تخصص (Major)</option>
+            <option value="cohort" ${sf.kind === 'cohort' ? 'selected' : ''}>دفعة / مستوى (Cohort)</option>
+            <option value="theory_group" ${sf.kind === 'theory_group' ? 'selected' : ''}>مجموعة نظرية</option>
+            <option value="practical_group" ${sf.kind === 'practical_group' ? 'selected' : ''}>مجموعة عملية</option>
+            <option value="college" ${sf.kind === 'college' ? 'selected' : ''}>كلية (للمطوّر)</option>
+          </select>
+          ${needParentKind ? `<select class="field" data-f4="devScope.parent_id">
+            ${parentPool.map(p => `<option value="${p.id}" ${String(sf.parent_id) === String(p.id) ? 'selected' : ''}>${esc(scopePathLabel(p, byId))}</option>`).join('') || '<option value="">لا يوجد نطاق أب</option>'}
+          </select>` : '<div class="muted" style="align-self:center;font-size:13px">عقدة جذرية (الكلية)</div>'}
+        </div>
+        <div class="two" style="margin-top:8px">
+          <input class="field" dir="ltr" data-f4="devScope.code" placeholder="الرمز (مثل: cs أو it4 أو IT4_G1)" value="${esc(sf.code)}">
+          <input class="field" data-f4="devScope.name_ar" placeholder="الاسم بالعربية" value="${esc(sf.name_ar)}">
+        </div>
+        ${sf.kind === 'cohort' ? `<div class="two" style="margin-top:8px">
+          <input class="field" data-f4="devScope.batch" placeholder="رقم الدفعة (مثل: 4)" value="${esc(sf.batch)}">
+          <input class="field" data-f4="devScope.level" placeholder="المستوى (مثل: المستوى الرابع)" value="${esc(sf.level)}">
+        </div>
+        <input class="field" style="margin-top:8px" dir="ltr" data-f4="devScope.theory_prefix" placeholder="بادئة النظرية (مثل: IT4_G)" value="${esc(sf.theory_prefix)}">` : ''}
+        <button class="btn primary sm" style="margin-top:10px" data-act="dev-scope-create">إنشاء العقدة</button>
+      </div>
+      <div class="sec">شجرة الكلية والتخصصات والدفعات (${nodes.length})</div>
+      ${nodes.map(n => `<div class="item" style="margin-right:${depthOf(n) * 14}px">
+        <div class="item-main">
+          <b>${esc(n.name_ar)}</b>
+          <div class="meta">${chip(SCOPE_KIND_LABELS[n.kind] || n.kind)}<code>${esc(n.code)}</code>${n.is_active === false ? chip('معطّل', 'warn') : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          ${n.kind === 'cohort' && n.id !== activeCohortId ? `<button class="btn sm primary" style="width:auto" data-act="switch-cohort" data-id="${n.id}">انتقال</button>` : ''}
+          <button class="btn sm ${n.is_active === false ? 'primary' : ''}" style="width:auto" data-act="dev-scope-toggle" data-id="${n.id}" data-active="${n.is_active === false ? 1 : 0}">${n.is_active === false ? 'تفعيل' : 'تعطيل'}</button>
+        </div>
+      </div>`).join('') || '<div class="card empty">لا توجد عقد بعد.</div>'}`;
+  }
 
   if (sub === 'students') {
     const stus = dv.students;
@@ -1186,29 +1305,53 @@ B.views['dev-view'] = sub => {
   }
 
   if (sub === 'roles') {
-    const cat = dv.cat;
-    if (!cat) return skel(3);
+    const nodes = dv.scopes || (B.scopeTree ? B.scopeTree() : []);
+    const rolesList = dv.scopedRoles || (dv.cat && dv.cat.roles) || null;
+    if (!rolesList) return skel(3);
     const rf = dv.roleForm;
+    const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+    const allowedKinds = ROLE_ALLOWED_KINDS[rf.role] || [];
+    const targetNodes = allowedKinds.length
+      ? nodes.filter(n => allowedKinds.includes(n.kind) && n.is_active !== false)
+      : [];
+    if (allowedKinds.length && targetNodes.length && !targetNodes.some(n => String(n.id) === String(rf.scope_node_id))) {
+      rf.scope_node_id = String(targetNodes[0].id);
+    }
+
     return `<div class="card" style="margin-bottom:12px">
-        <b>منح صلاحية لمستخدم (تُفعّل خلال ثوانٍ)</b>
+        <b>منح دور بنطاق (Scoped Role Grant)</b>
         <div class="two" style="margin-top:8px">
           <input class="field" dir="ltr" inputmode="numeric" data-f4="devRole.telegram_id" placeholder="Telegram ID" value="${esc(rf.telegram_id)}">
           <select class="field" data-f4="devRole.role">
+            <option value="college_admin" ${rf.role === 'college_admin' ? 'selected' : ''}>مشرف الكلية (College Admin)</option>
+            <option value="major_admin" ${rf.role === 'major_admin' ? 'selected' : ''}>مشرف التخصص (Major Admin)</option>
+            <option value="cohort_admin" ${rf.role === 'cohort_admin' ? 'selected' : ''}>مشرف الدفعة (Cohort Admin)</option>
+            <option value="group_rep" ${rf.role === 'group_rep' ? 'selected' : ''}>مندوب مجموعة (Group Rep)</option>
             <option value="delegate" ${rf.role === 'delegate' ? 'selected' : ''}>مندوب</option>
             <option value="deputy" ${rf.role === 'deputy' ? 'selected' : ''}>نائب مندوب</option>
             <option value="committee" ${rf.role === 'committee' ? 'selected' : ''}>لجنة علمية</option>
-            <option value="developer" ${rf.role === 'developer' ? 'selected' : ''}>مطوّر</option>
+            <option value="developer" ${rf.role === 'developer' ? 'selected' : ''}>مطوّر (النظام كاملًا)</option>
           </select>
         </div>
-        ${rf.role !== 'developer' ? `<div style="margin-top:8px">${seg('dev-rgrp', B.theoryGroups().map(g => [g, g]), rf.group)}</div>` : ''}
+        ${rf.role !== 'developer' ? `<div style="margin-top:8px">
+          <select class="field" data-f4="devRole.scope_node_id">
+            ${targetNodes.map(n => `<option value="${n.id}" ${String(rf.scope_node_id) === String(n.id) ? 'selected' : ''}>${esc(scopePathLabel(n, byId))} (${esc(SCOPE_KIND_LABELS[n.kind] || n.kind)})</option>`).join('') || '<option value="">لا توجد عقدة نطاق متاحة لهذا الدور</option>'}
+          </select>
+        </div>` : '<p class="muted" style="margin:8px 0 0;font-size:13px">صلاحية المطوّر تشمل الكلية وكل التخصصات والدفعات.</p>'}
         <button class="btn primary sm" style="margin-top:10px" data-act="dev-role-grant">منح الصلاحية</button>
       </div>
-      <div class="sec">المشرفون الحاليون (${(cat.roles || []).length})</div>
-      ${(cat.roles || []).map(r => `<div class="item">
-        <div class="item-main"><b>${esc(r.name)}</b>
-          <div class="meta">${chip(ROLE_LABELS[r.role] || r.role)}${r.group ? chip(r.group) : chip('عام')}<code>TG: ${r.telegram_id}</code></div></div>
-        <button class="btn sm danger" style="width:auto" data-act="dev-role-rev" data-id="${r.id}">سحب</button>
-      </div>`).join('')}`;
+      <div class="sec">المشرفون الحاليون (${rolesList.length})</div>
+      ${rolesList.map(r => {
+        const scopeBadge = r.role === 'developer'
+          ? 'المنصة كاملة'
+          : (r.scope_name_ar || r.scope_code || r.group || 'نطاق');
+        const kindTag = r.scope_kind ? `${SCOPE_KIND_LABELS[r.scope_kind] || r.scope_kind}: ` : '';
+        return `<div class="item">
+          <div class="item-main"><b>${esc(r.name || String(r.telegram_id))}</b>
+            <div class="meta">${chip(ROLE_LABELS[r.role] || r.role)}${chip(kindTag + scopeBadge)}<code>TG: ${r.telegram_id}</code></div></div>
+          <button class="btn sm danger" style="width:auto" data-act="dev-role-rev" data-id="${r.id}">سحب</button>
+        </div>`;
+      }).join('') || '<div class="card empty">لا توجد صلاحيات ممنوحة ضمن نطاقك.</div>'}`;
   }
 
   if (sub === 'catalog') {
@@ -1372,7 +1515,8 @@ document.addEventListener('input', e => {
     else if (o === 'ntf') P4.ntf[k] = t.value;
     else if (o === 'dev') P4.dev[k] = t.value;
     else if (o === 'devStu' && P4.dev.stuForm) P4.dev.stuForm[k] = t.value;
-    else if (o === 'devRole') P4.dev.roleForm[k] = t.value;
+    else if (o === 'devScope') { P4.dev.scopeForm[k] = t.value; if (k === 'kind') rerender(); }
+    else if (o === 'devRole') { P4.dev.roleForm[k] = t.value; if (k === 'role') { P4.dev.roleForm.scope_node_id = ''; rerender(); } }
     else if (o === 'devSubj') P4.dev.subjForm[k] = t.value;
     else if (o === 'devDoc') P4.dev.docForm[k] = t.value;
     else if (o === 'devTeach') P4.dev.teachForm[k] = t.value;
@@ -1772,17 +1916,70 @@ Object.assign(B.actions, {
     const r = await call('/api/dev/users/ban', 'POST', { telegram_id: +d.id, banned: d.ban === '1' });
     if (r.status === 200) { B.ls.delPrefix('dev-guests'); B.toast(d.ban === '1' ? 'تم الحظر' : 'تم فك الحظر'); loadDevSub('guests', true); }
   }),
+  'dev-scope-create': async () => {
+    const sf = P4.dev.scopeForm;
+    if (!sf.code.trim() || !sf.name_ar.trim()) return B.toast('أدخل الرمز والاسم بالعربية.');
+    const needParent = SCOPE_PARENT_KIND[sf.kind] !== null;
+    if (needParent && !sf.parent_id) return B.toast('اختر النطاق الأب أولًا.');
+    const meta = sf.kind === 'cohort'
+      ? { batch: sf.batch.trim(), level: sf.level.trim(), theory_prefix: sf.theory_prefix.trim().toUpperCase() }
+      : {};
+    const r = await call('/api/scopes/nodes', 'POST', {
+      parent_id: needParent ? +sf.parent_id : null,
+      kind: sf.kind,
+      code: sf.code.trim(),
+      name_ar: sf.name_ar.trim(),
+      meta,
+      sort: 0,
+    });
+    if (r.status === 403) return B.toast('لا تملك صلاحية إنشاء هذا النطاق.');
+    if (r.status !== 200) return B.toast('تعذّر إنشاء العقدة (تحقّق من عدم تكرار الرمز).');
+    sf.code = ''; sf.name_ar = ''; sf.batch = ''; sf.level = ''; sf.theory_prefix = '';
+    B.ls.delPrefix('dev-scopes');
+    B.toast('تم إنشاء العقدة بنجاح ✅');
+    loadDevSub('scopes', true);
+    if (B.refresh) B.refresh(true);
+  },
+  'dev-scope-toggle': async d => {
+    const active = d.active === '1';
+    const r = await call(`/api/scopes/nodes/${d.id}`, 'PATCH', { is_active: active });
+    if (r.status === 403) return B.toast('لا تملك صلاحية تعديل هذا النطاق.');
+    if (r.status !== 200) return B.toast('تعذّر تحديث العقدة.');
+    B.ls.delPrefix('dev-scopes');
+    B.toast(active ? 'تم التفعيل ✅' : 'تم التعطيل');
+    loadDevSub('scopes', true);
+    if (B.refresh) B.refresh(true);
+  },
   'dev-rgrp': d => { P4.dev.roleForm.group = d.v; rerender(); },
   'dev-role-grant': async () => {
     const rf = P4.dev.roleForm;
     if (!rf.telegram_id) return B.toast('أدخل Telegram ID.');
-    const r = await call('/api/dev/roles', 'POST', { telegram_id: +rf.telegram_id, role: rf.role, group: rf.role === 'developer' ? null : rf.group });
-    if (r.status !== 200) return B.toast('تعذّر منح الصلاحية.');
-    rf.telegram_id = ''; B.ls.delPrefix('dev-cat'); B.toast('تم منح الصلاحية ✅'); loadDevSub('roles', true);
+    if (rf.role !== 'developer' && !rf.scope_node_id) return B.toast('اختر عقدة النطاق.');
+    const r = await call('/api/admin/roles/grant', 'POST', {
+      telegram_id: +rf.telegram_id,
+      role: rf.role,
+      scope_node_id: rf.role === 'developer' ? null : +rf.scope_node_id,
+    });
+    if (r.status === 403) return B.toast('لا تملك صلاحية منح هذا الدور أو النطاق.');
+    if (r.status !== 200 || (r.data && r.data.status && r.data.status !== 'ok')) {
+      const st = r.data && r.data.status;
+      return B.toast(st === 'exists' ? 'هذه الصلاحية ممنوحة بالفعل.' : 'تعذّر منح الصلاحية.');
+    }
+    rf.telegram_id = '';
+    B.ls.delPrefix('dev-scoped-roles');
+    B.toast('تم منح الصلاحية ✅');
+    loadDevSub('roles', true);
   },
   'dev-role-rev': d => ask('سحب هذه الصلاحية؟', async () => {
-    const r = await call(`/api/dev/roles/${d.id}`, 'DELETE');
-    if (r.status === 200) { B.ls.delPrefix('dev-cat'); B.toast('تم سحب الصلاحية'); loadDevSub('roles', true); }
+    const r = await call('/api/admin/roles/revoke', 'POST', { grant_id: +d.id });
+    if (r.status === 403) return B.toast('لا تملك صلاحية سحب هذا الدور.');
+    if (r.status === 200 && (!r.data || r.data.status === 'ok')) {
+      B.ls.delPrefix('dev-scoped-roles');
+      B.toast('تم سحب الصلاحية');
+      loadDevSub('roles', true);
+    } else if (r.data && r.data.status === 'last_developer') {
+      B.toast('لا يمكن سحب آخر مطوّر في النظام.');
+    }
   }),
   'dev-subj-save': async () => {
     const sf = P4.dev.subjForm;
@@ -1909,6 +2106,7 @@ Object.assign(B.titles, {
   'doc-export': 'تصدير Excel',
   'notify-send': 'إرسال إشعار يدوي',
   dev: 'لوحة المطوّر',
+  'dev-view:scopes': 'إدارة الكلية والدفعات',
   'dev-view:students': 'إدارة الطلاب',
   'dev-view:guests': 'الزوار والحظر',
   'dev-view:roles': 'إدارة الأدوار والصلاحيات',
@@ -1985,6 +2183,20 @@ function demoRead4(path) {
     assignments: [
       { id: 11, number: 3, subject: 'البرمجة الهدفية', part: 'theory', grp: 'CS2_G1', due_at: h(5), status: 'open', submitted: 38, total: 52 },
       { id: 10, number: 2, subject: 'البرمجة الهدفية', part: 'theory', grp: 'CS2_G2', due_at: h(-48), status: 'closed', submitted: 49, total: 50 },
+    ],
+  };
+  if (path.startsWith('/api/scopes/tree')) return {
+    nodes: [
+      { id: 1, kind: 'college', parent_id: null, code: 'csit', name_ar: 'كلية علوم الحاسوب وتقنية المعلومات', path: [1], is_active: true },
+      { id: 2, kind: 'major', parent_id: 1, code: 'it', name_ar: 'تقنية المعلومات', path: [1, 2], is_active: true },
+      { id: 10, kind: 'cohort', parent_id: 2, code: 'it3', name_ar: 'الدفعة الثالثة', path: [1, 2, 10], is_active: true },
+      { id: 100, kind: 'theory_group', parent_id: 10, code: 'IT3_G1', name_ar: 'IT3_G1', path: [1, 2, 10, 100], is_active: true },
+      { id: 1001, kind: 'practical_group', parent_id: 100, code: 'G1', name_ar: 'G1', path: [1, 2, 10, 100, 1001], is_active: true },
+    ],
+  };
+  if (path.startsWith('/api/admin/roles')) return {
+    roles: [
+      { id: 1, telegram_id: 777001, name: 'سارة محمد العلي', role: 'cohort_admin', scope_node_id: 10, scope_kind: 'cohort', scope_code: 'it3', scope_name_ar: 'الدفعة الثالثة' },
     ],
   };
   if (path.startsWith('/api/dev/overview')) return {

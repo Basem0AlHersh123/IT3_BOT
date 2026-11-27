@@ -13,6 +13,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.services import Services, svc
+from bot.texts import LOCKED_MSG
 from bot.ui import btn, kb, say
 from core import messages
 from core.assignments import STATUS_AR, parse_ts, student_status
@@ -27,7 +28,6 @@ from core.barcode import render_barcode_png
 from core.grievances import PART_AR, validate_grievance_reason
 from core.permissions import can
 from core.timeutil import format_datetime_ar, now_utc
-from core import cohort
 
 log = logging.getLogger("phase3")
 
@@ -283,7 +283,7 @@ async def on_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[
 
     if head == "m" and action == "affairs":
         if not can(perms, "affairs.use"):
-            return await say(bot, chat, f"هذه الميزة خاصة ب{cohort.get().students_noun}")
+            return await say(bot, chat, LOCKED_MSG)
         return await show_affairs_menu(bot, chat)
 
     if head == "m" and action == "ai":
@@ -293,7 +293,7 @@ async def on_cb(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[
 
     if head == "af":
         if not can(perms, "affairs.use"):
-            return await say(bot, chat, f"هذه الميزة خاصة ب{cohort.get().students_noun}")
+            return await say(bot, chat, LOCKED_MSG)
         if action == "att":
             return await show_my_attendance(bot, s, chat, tg)
         if action == "bar":

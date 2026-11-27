@@ -20,7 +20,6 @@ from api.deps import current_user, etag_response, store
 from api.phase2 import router as phase2_router
 from api.phase3 import router as phase3_router
 from api.phase4 import router as phase4_router
-from core import cohort
 from core.store import StoreError
 from core.text import clean_name, normalize_academic_no
 from core.tg_auth import TgUser
@@ -58,10 +57,14 @@ async def health() -> dict[str, object]:
 
 
 @app.get("/api/bootstrap")
-async def bootstrap(request: Request, user: TgUser = Depends(current_user)) -> Response:
-    data = await store().bootstrap(user.id, user.full_name, user.username)
-    if isinstance(data, dict):
-        data = {**data, "cohort": cohort.get().public()}   # هوية الدفعة وعدد المجموعات للواجهة
+async def bootstrap(
+    request: Request,
+    cohort_node_id: int | None = None,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    data = await store().bootstrap(user.id, user.full_name, user.username, cohort_node_id=cohort_node_id)
+    if isinstance(data, dict) and "cohort" not in data and isinstance(data.get("active_cohort"), dict):
+        data = {**data, "cohort": data["active_cohort"]}
     return etag_response(request, data)
 
 
@@ -71,11 +74,21 @@ async def versions(request: Request, _: TgUser = Depends(current_user)) -> Respo
 
 
 @app.get("/api/public/catalog")
-async def public_catalog() -> Response:
+async def public_catalog(cohort_node_id: int | None = None) -> Response:
     """بيانات عامة غير شخصية فقط، فتُخزَّن على حافة Vercel."""
-    subjects = await store().select("subjects", {
-        "select": "id,name_ar,hashtag", "is_active": "eq.true", "deleted_at": "is.null", "order": "sort,id"})
-    groups = await store().select("practical_groups", {"select": "code,theory_group_id", "order": "sort"})
+    subj_params: dict[str, str] = {
+        "select": "id,name_ar,hashtag,cohort_node_id",
+        "is_active": "eq.true",
+        "deleted_at": "is.null",
+        "order": "sort,id",
+    }
+    if cohort_node_id is not None:
+        subj_params["cohort_node_id"] = f"eq.{int(cohort_node_id)}"
+    subjects = await store().select("subjects", subj_params)
+    grp_params: dict[str, str] = {"select": "code,theory_group_id,scope_node_id,cohort_node_id", "order": "sort"}
+    if cohort_node_id is not None:
+        grp_params["cohort_node_id"] = f"eq.{int(cohort_node_id)}"
+    groups = await store().select("practical_groups", grp_params)
     body = json.dumps({"subjects": subjects, "practical_groups": groups}, ensure_ascii=False, separators=(",", ":"))
     return Response(body, media_type="application/json",
                     headers={"Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600"})
@@ -115,3 +128,99 @@ async def guest(body: GuestIn, user: TgUser = Depends(current_user)) -> Response
     if not name:
         raise HTTPException(422, "invalid_name")
     return _no_store(await store().register_guest(user.id, name, user.username))
+
+
+class ActiveCohortIn(BaseModel):
+    cohort_node_id: int
+
+
+class ScopeNodeCreateIn(BaseModel):
+    parent_id: int | None = None
+    kind: str = Field(max_length=24)
+    code: str = Field(min_length=1, max_length=32)
+    name_ar: str = Field(min_length=1, max_length=80)
+    meta: dict[str, object] = Field(default_factory=dict)
+    sort: int = 0
+
+
+class ScopeNodeUpdateIn(BaseModel):
+    name_ar: str | None = Field(default=None, max_length=80)
+    meta: dict[str, object] | None = None
+    sort: int | None = None
+    is_active: bool | None = None
+
+
+class ScopedRoleGrantIn(BaseModel):
+    telegram_id: int
+    role: str = Field(max_length=24)
+    scope_node_id: int | None = None
+
+
+class ScopedRoleRevokeIn(BaseModel):
+    grant_id: int
+
+
+@app.get("/api/scopes/tree")
+async def scopes_tree(
+    request: Request,
+    root_id: int | None = None,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    nodes = await store().list_scope_tree(user.id, root_id)
+    return etag_response(request, {"nodes": nodes})
+
+
+@app.post("/api/scopes/nodes")
+async def scopes_create_node(body: ScopeNodeCreateIn, user: TgUser = Depends(current_user)) -> Response:
+    res = await store().create_scope_node(
+        user.id,
+        body.parent_id,
+        body.kind,
+        body.code,
+        body.name_ar,
+        meta=dict(body.meta),
+        sort=body.sort,
+    )
+    return _no_store(res)
+
+
+@app.patch("/api/scopes/nodes/{node_id}")
+async def scopes_update_node(
+    node_id: int,
+    body: ScopeNodeUpdateIn,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    res = await store().update_scope_node(
+        user.id,
+        node_id,
+        name_ar=body.name_ar,
+        meta=dict(body.meta) if body.meta is not None else None,
+        sort=body.sort,
+        is_active=body.is_active,
+    )
+    return _no_store(res)
+
+
+@app.post("/api/user/active-cohort")
+async def user_active_cohort(body: ActiveCohortIn, user: TgUser = Depends(current_user)) -> Response:
+    return _no_store(await store().set_active_cohort(user.id, body.cohort_node_id))
+
+
+@app.get("/api/admin/roles")
+async def admin_list_roles(
+    request: Request,
+    root_id: int | None = None,
+    user: TgUser = Depends(current_user),
+) -> Response:
+    roles = await store().rpc("list_scoped_roles", {"p_actor": user.id, "p_root_id": root_id})
+    return etag_response(request, {"roles": roles})
+
+
+@app.post("/api/admin/roles/grant")
+async def admin_grant_role(body: ScopedRoleGrantIn, user: TgUser = Depends(current_user)) -> Response:
+    return _no_store(await store().grant_role_scoped(user.id, body.telegram_id, body.role, body.scope_node_id))
+
+
+@app.post("/api/admin/roles/revoke")
+async def admin_revoke_role(body: ScopedRoleRevokeIn, user: TgUser = Depends(current_user)) -> Response:
+    return _no_store(await store().rpc("revoke_role", {"p_actor": user.id, "p_grant_id": body.grant_id}))

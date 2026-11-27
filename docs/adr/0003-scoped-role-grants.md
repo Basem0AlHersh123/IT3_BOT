@@ -1,5 +1,5 @@
 ---
-status: accepted (not implemented)
+status: accepted (implemented)
 door: one-way
 ---
 
