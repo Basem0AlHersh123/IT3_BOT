@@ -213,6 +213,47 @@ class FileSearchTests(unittest.TestCase):
             _, _, matched = answer_local_intent(q, GUEST, NOW)
             self.assertTrue(matched, q)
 
+    def test_personal_key_bypasses_college_quota_and_not_counted(self):
+        seen_overrides = []
+
+        async def fake_gemini(sys_p, user_p, **kw):
+            seen_overrides.append(kw.get("keys_override"))
+            return {"answer": "إجابة عبر مفتاحك الشخصي.", "needs_ticket": False}
+
+        st = FakeStore()
+        with mock.patch.object(assistant, "_call_gemini_json", fake_gemini):
+            r = run(ask_assistant("سؤال عام عن النظام", GUEST, NOW, store=st, allow_ai=False,
+                                  user_api_key="AIzaSyDummyStudentPersonalKey123456"))
+        self.assertFalse(r["blocked"])
+        self.assertTrue(r["used_ai"])
+        self.assertTrue(r["used_personal_key"])
+        self.assertFalse(r["counted"])
+        self.assertEqual(seen_overrides, [["AIzaSyDummyStudentPersonalKey123456"]])
+
+    def test_personal_key_failure_falls_back_to_college_key(self):
+        calls = []
+
+        async def fake_gemini(sys_p, user_p, **kw):
+            calls.append(kw.get("keys_override"))
+            if kw.get("keys_override"):
+                return None  # personal key failed
+            return {"answer": "إجابة عبر مفتاح الكلية.", "needs_ticket": False}
+
+        st = FakeStore()
+        with mock.patch.object(assistant, "_call_gemini_json", fake_gemini), \
+             mock.patch.dict(os.environ, {"GEMINI_API_KEYS": "AIzaSyCollegeKey12345678901234567890"}):
+            r = run(ask_assistant("سؤال جديد آخر", GUEST, NOW, store=st, allow_ai=True,
+                                  user_api_key="AIzaSyBadStudentKey1234567890"))
+        self.assertTrue(r["used_ai"])
+        self.assertTrue(r["personal_key_failed"])
+        self.assertTrue(r["counted"])
+        self.assertEqual(len(calls), 2)
+
+    def test_gemini_key_format_guard(self):
+        ok, detail = run(assistant.test_gemini_key("short"))
+        self.assertFalse(ok)
+        self.assertEqual(detail, "invalid_format")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,10 +103,11 @@ function dtPickerHTML(dateField, dateVal, timeField, timeVal) {
 
 /* ---------- الشبكة والكاش الذكي بـ TTL (يمنع تكرار الطلبات لـ Vercel CDN) ---------- */
 const SWR_TTL_MS = 120000; // دقيقتان
-async function call(path, method = 'GET', body) {
+async function call(path, method = 'GET', body, headers) {
   if (B.DEMO) return { status: 200, data: demoWrite(path, method, body) };
-  try { return await B.api(path, { method, body }); } catch { return { status: 0, data: null }; }
+  try { return await B.api(path, { method, body, headers }); } catch { return { status: 0, data: null }; }
 }
+const myGeminiKey = () => String(B.ls.get(`bs2:${B.UID}:gemini_key`) || '').trim();
 async function swr(key, path, apply, force = false, ttlMs = SWR_TTL_MS) {
   const k = `bs2:${B.UID}:${key}`, c = B.ls.get(k);
   if (c && c.data !== undefined) {
@@ -1102,6 +1103,7 @@ function renderAssistantView() {
       </div>
     </div>
     <div class="ai-top-left">
+      <button class="ai-headset-btn ${ai.showKey || myGeminiKey() ? 'on' : ''}" data-act="ai-key-toggle" aria-label="مفتاح Gemini الخاص بك" title="مفتاح Gemini الخاص بك">🔑</button>
       ${isDev ? `<button class="ai-headset-btn ${ai.staffTab === 'staff' ? 'on' : ''}" data-act="ai-dev-toggle" title="بلاغات المستخدمين">📩</button>` : ''}
       <button class="ai-headset-btn ${ai.showTicket ? 'on' : ''}" data-act="tkt-toggle" aria-label="تذكرة للدعم" title="تواصل مع الدعم">${F_ICONS.headset}</button>
     </div>
@@ -1202,6 +1204,32 @@ function renderAssistantView() {
     </div>`);
   }
 
+  const savedKey = myGeminiKey();
+  if (ai.showKey) {
+    streamItems.push(`<div class="ai-bot-card" style="border-color:var(--brand)">
+      <b>🔑 مفتاح Gemini الخاص بك (مجاني وبلا حد يومي)</b>
+      <div class="chips" style="margin:6px 0 8px">
+        ${savedKey ? chip('مفتاحك الخاص مفعّل ✅', 'ok') : chip(`حصة الكلية المتبقية اليوم: ${rem}`)}
+      </div>
+      <p class="hint" style="margin:0 0 8px">
+        يمكنك استخدام حصة الكلية المجانية، أو إضافة مفتاحك المجاني من Google AI Studio للمتابعة بلا حدود حتى لو انتهت الحصة اليومية.
+        <b>مفتاحك يُحفظ على جهازك فقط</b> ولا يُخزَّن في قاعدة بيانات الكلية.
+      </p>
+      <div class="preview" style="margin:0 0 10px;font-size:13px;line-height:1.7">
+        <b>كيف تحصل على مفتاح مجاني في دقيقة؟</b>
+        1) افتح <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline">aistudio.google.com/apikey</a> وسجّل بحسابك في Google.
+        2) اضغط <b>Create API Key</b> ثم انسخ المفتاح (يبدأ بـ <code>AIza...</code>).
+        3) الصقه هنا واضغط <b>حفظ واختبار</b>.
+      </div>
+      <input class="field" type="password" dir="ltr" autocomplete="off" data-f="ai.keyInput" placeholder="AIza..." value="${esc(ai.keyInput !== undefined ? ai.keyInput : savedKey)}">
+      <div class="row-actions" style="margin-top:8px">
+        <button class="btn primary sm" data-act="ai-key-save" ${ai.keyBusy ? 'disabled' : ''}>${ai.keyBusy ? 'جارٍ الاختبار…' : 'حفظ واختبار المفتاح'}</button>
+        ${savedKey ? '<button class="btn sm danger" data-act="ai-key-clear">مسح المفتاح</button>' : ''}
+        <button class="btn sm" data-act="ai-key-toggle">إغلاق</button>
+      </div>
+    </div>`);
+  }
+
   const draftTBody = ai.tBody || B.ls.get(draftKey('ticket_body')) || '';
   if (ai.showTicket) {
     streamItems.push(`<div class="ai-bot-card" style="border-color:var(--brand)">
@@ -1241,7 +1269,8 @@ async function sendAssistantQuestion(qText) {
   const q = (qText || P.ai.q || '').trim();
   if (!q) return B.toast('اكتب سؤالك أولًا.');
   P.ai.busy = true; P.ai.err = ''; P.ai.pendingQ = q; P.ai.q = ''; rerender(); scrollChatToBottom();
-  const r = await call('/api/assistant/ask', 'POST', { question: q });
+  const uKey = myGeminiKey();
+  const r = await call('/api/assistant/ask', 'POST', { question: q }, uKey ? { 'X-User-Gemini-Key': uKey } : undefined);
   P.ai.busy = false; P.ai.pendingQ = '';
   if (r.status === 200 && r.data) {
     if (!P.ai.info) P.ai.info = { history: [] };
@@ -1251,11 +1280,12 @@ async function sendAssistantQuestion(qText) {
     P.ai.info.limit = r.data.limit;
     if (r.data.attendance) P.ai.info.attendance = r.data.attendance;
     P.ai.lastFiles = r.data.files || [];
+    if (r.data.personal_key_failed) B.toast('تعذّر استخدام مفتاحك الخاص، تم التبديل لحصة الكلية.');
     if (r.data.needs_ticket) P.ai.showTicket = true;
   } else if (r.status === 429) {
     if (P.ai.info) P.ai.info.remaining = 0;
-    P.ai.showTicket = true;
-    B.toast('هذا السؤال يحتاج رصيد الذكاء الاصطناعي وقد انتهى اليوم. الأسئلة الجاهزة متاحة، أو راسل الدعم.');
+    P.ai.showKey = true;
+    B.toast('انتهت حصة الذكاء الاصطناعي اليوم. أضف مفتاح Gemini مجاني الخاص بك بالضغط على 🔑 للمتابعة بلا حدود!');
   } else {
     B.toast(failMsg(r));
   }
@@ -1270,6 +1300,36 @@ Object.assign(B.actions, {
     const cur = P.ai.reactions[d.idx];
     P.ai.reactions[d.idx] = cur === d.v ? '' : d.v;
     B.toast(d.v === 'up' ? 'شكرًا لتقييمك الإيجابي 👍' : 'شكرًا لملاحظتك، سنحسّن الإجابات 🙏');
+    rerender();
+  },
+  'ai-key-toggle': () => {
+    P.ai.staffTab = 'chat';
+    P.ai.showKey = !P.ai.showKey;
+    if (P.ai.showKey) P.ai.keyInput = myGeminiKey();
+    rerender();
+    scrollChatToBottom();
+  },
+  'ai-key-save': async () => {
+    const inp = document.querySelector('[data-f="ai.keyInput"]');
+    const k = String((inp ? inp.value : P.ai.keyInput) || '').trim();
+    if (k.length < 20) return B.toast('أدخل مفتاح Gemini API صالحًا (يبدأ بـ AIza...).');
+    P.ai.keyBusy = true; rerender();
+    const r = await call('/api/assistant/test-key', 'POST', {}, { 'X-User-Gemini-Key': k });
+    P.ai.keyBusy = false;
+    if (r.status === 200 && r.data && r.data.ok) {
+      B.ls.set(`bs2:${B.UID}:gemini_key`, k);
+      P.ai.keyInput = k;
+      P.ai.showKey = false;
+      B.toast('تم حفظ وتفعيل مفتاحك الخاص بنجاح ✅');
+    } else {
+      B.toast('المفتاح غير صالح أو منتهي الصلاحية. تأكد من نسخه بالكامل من Google AI Studio.');
+    }
+    rerender();
+  },
+  'ai-key-clear': () => {
+    B.ls.del(`bs2:${B.UID}:gemini_key`);
+    P.ai.keyInput = '';
+    B.toast('تم مسح مفتاحك الخاص؛ ستستخدم حصة الكلية المجانية.');
     rerender();
   },
   'tkt-toggle': () => { P.ai.staffTab = 'chat'; P.ai.showTicket = !P.ai.showTicket; P.ai.err = ''; rerender(); scrollChatToBottom(); },

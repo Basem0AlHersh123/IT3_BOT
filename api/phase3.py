@@ -21,6 +21,7 @@ from core.assistant import (
     rank_files,
     search_params,
     smart_search_files,
+    test_gemini_key,
     validate_ticket,
     validate_ticket_reply,
 )
@@ -533,13 +534,29 @@ class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=600)
 
 
+@router.post("/assistant/test-key")
+async def assistant_test_key(
+    x_user_gemini_key: str | None = Header(default=None, alias="X-User-Gemini-Key"),
+    user: TgUser = Depends(current_user),
+) -> JSONResponse:
+    ok, detail = await test_gemini_key(x_user_gemini_key or "")
+    return _no_store({"ok": ok, "detail": detail})
+
+
 @router.post("/assistant/ask")
-async def assistant_ask(body: AskIn, user: TgUser = Depends(current_user)) -> JSONResponse:
+async def assistant_ask(
+    body: AskIn,
+    x_user_gemini_key: str | None = Header(default=None, alias="X-User-Gemini-Key"),
+    user: TgUser = Depends(current_user),
+) -> JSONResponse:
     ctx = await store().rpc("assistant_context", {"p_tg": user.id})
     remaining = int(ctx.get("remaining") or 0)
+    personal_key = (x_user_gemini_key or "").strip()[:120] or None
 
-    # الأسئلة الجاهزة والكاش مجانية؛ Gemini فقط عند وجود رصيد، ولا يُخصم الرصيد إلا إذا استُهلك Gemini فعلًا
-    reply = await ask_assistant(body.question, ctx, _now(), store=store(), allow_ai=remaining > 0)
+    # الأسئلة الجاهزة والكاش مجانية؛ مفتاح الطالب الشخصي مجاني بلا حد؛ ومفتاح الكلية يُحسب فقط عند استهلاكه
+    reply = await ask_assistant(
+        body.question, ctx, _now(), store=store(), allow_ai=remaining > 0, user_api_key=personal_key
+    )
     if reply.get("blocked"):
         raise HTTPException(429, "daily_limit_reached")
 
@@ -567,6 +584,8 @@ async def assistant_ask(body: AskIn, user: TgUser = Depends(current_user)) -> JS
         "answer": reply["answer"],
         "needs_ticket": reply["needs_ticket"],
         "used_ai": reply["used_ai"],
+        "used_personal_key": bool(reply.get("used_personal_key")),
+        "personal_key_failed": bool(reply.get("personal_key_failed")),
         "files": matched_files,
         "attendance": ctx.get("attendance", []),
         "used": rec.get("used", 0),

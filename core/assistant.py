@@ -272,7 +272,7 @@ def rank_files(rows: Sequence[Mapping[str, Any]], criteria: Mapping[str, Any], l
 # ------------------------------------------------------------------
 # عميل Gemini الاختياري عبر HTTP (بلا مكتبات ثقيلة، مع تدوير المفاتيح والاحتياطي الفوري)
 # ------------------------------------------------------------------
-_GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.8-flash")
+_GEMINI_MODELS = ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
 _key_idx = 0
 _key_cooldown: dict[str, float] = {}
 
@@ -291,17 +291,25 @@ def _gemini_keys() -> list[str]:
     return [k.strip() for k in re.split(r"[,;\s]+", raw) if k.strip()]
 
 
-async def _call_gemini_json(system_prompt: str, user_prompt: str, timeout: float = 8.0, max_tokens: int = 1000) -> dict[str, Any] | None:
+async def _call_gemini_json(
+    system_prompt: str,
+    user_prompt: str,
+    timeout: float = 8.0,
+    max_tokens: int = 1000,
+    *,
+    keys_override: list[str] | None = None,
+) -> dict[str, Any] | None:
     global _key_idx
-    keys = _gemini_keys()
+    use_override = keys_override is not None
+    keys = [k.strip() for k in keys_override if k and k.strip()] if use_override else _gemini_keys()
     if not keys:
         return None
     now = time.monotonic()
     for model in _gemini_models():
         for step in range(len(keys)):
-            idx = (_key_idx + step) % len(keys)
+            idx = step if use_override else (_key_idx + step) % len(keys)
             key = keys[idx]
-            if now < _key_cooldown.get(key, 0.0):
+            if not use_override and now < _key_cooldown.get(key, 0.0):
                 continue
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
             payload: dict[str, Any] = {
@@ -313,12 +321,14 @@ async def _call_gemini_json(system_prompt: str, user_prompt: str, timeout: float
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     resp = await client.post(url, json=payload)
                 if resp.status_code == 429:
-                    _key_cooldown[key] = time.monotonic() + 60.0
-                    _key_idx = (idx + 1) % len(keys)
+                    if not use_override:
+                        _key_cooldown[key] = time.monotonic() + 60.0
+                        _key_idx = (idx + 1) % len(keys)
                     continue
                 if resp.status_code in (401, 403):
-                    _key_cooldown[key] = time.monotonic() + 600.0
-                    _key_idx = (idx + 1) % len(keys)
+                    if not use_override:
+                        _key_cooldown[key] = time.monotonic() + 600.0
+                        _key_idx = (idx + 1) % len(keys)
                     continue
                 if resp.status_code >= 400:
                     break
@@ -332,12 +342,30 @@ async def _call_gemini_json(system_prompt: str, user_prompt: str, timeout: float
                 cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE)
                 s_idx, e_idx = cleaned.find("{"), cleaned.rfind("}")
                 if s_idx != -1 and e_idx > s_idx:
-                    _key_idx = idx
+                    if not use_override:
+                        _key_idx = idx
                     return json.loads(cleaned[s_idx:e_idx + 1])
             except Exception as exc:  # noqa: BLE001
                 log.debug("gemini fallback (%s): %s", model, exc)
                 break
     return None
+
+
+async def test_gemini_key(api_key: str) -> tuple[bool, str]:
+    """Verify a student-supplied Gemini API key works without storing or logging it."""
+    clean = (api_key or "").strip()
+    if len(clean) < 20 or len(clean) > 120 or not re.fullmatch(r"[A-Za-z0-9_\-]+", clean):
+        return False, "invalid_format"
+    res = await _call_gemini_json(
+        'Return JSON only: {"ok": true}',
+        "ping",
+        timeout=8.0,
+        max_tokens=60,
+        keys_override=[clean],
+    )
+    if isinstance(res, dict):
+        return True, "ok"
+    return False, "key_rejected"
 
 
 # ------------------------------------------------------------------
@@ -918,14 +946,25 @@ _GUIDE_HASH = hashlib.sha1((BOT_GUIDE + "|v3_privacy").encode("utf-8")).hexdiges
 
 
 async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | None = None,
-                        store: Any = None, allow_ai: bool = True) -> dict[str, Any]:
+                        store: Any = None, allow_ai: bool = True,
+                        user_api_key: str | None = None) -> dict[str, Any]:
     """يرد على سؤال المستخدم مع ضمان عدم تسريب أي بيانات خاصة بطلاب آخرين في الأسئلة المكررة:
     (1) النيّات والأسئلة الجاهزة المحلية تُجاب فوراً (وببيانات الطالب السائل وحده عند السؤال عن حالته).
     (2) الأسئلة العامة المتكررة تُقرأ وتُحفظ في كاش مشترك بشرط خلوّ السؤال والرد تماماً من أي بيانات شخصية.
-    (3) Gemini يجيب بالاعتماد على دليل الطالب المعتمد دون تضمين بيانات طلاب آخرين."""
+    (3) Gemini يجيب بالاعتماد على دليل الطالب المعتمد دون تضمين بيانات طلاب آخرين؛
+        وإذا وفّر الطالب مفتاح Gemini الخاص به يُستخدم أولاً دون خصم من حصة الكلية."""
     now = now or datetime.now(UTC)
     clean_q = re.sub(r"\s+", " ", (question or "")).strip()[:500]
-    base = {"needs_ticket": False, "used_ai": False, "counted": False, "blocked": False}
+    personal_key = (user_api_key or "").strip()[:120]
+    has_personal = len(personal_key) >= 20
+    base = {
+        "needs_ticket": False,
+        "used_ai": False,
+        "counted": False,
+        "blocked": False,
+        "used_personal_key": False,
+        "personal_key_failed": False,
+    }
     if not clean_q:
         return {**base, "answer": "اكتب سؤالك وسأجيبك من دليل البوت ومن بياناتك المسجّلة."}
 
@@ -934,7 +973,7 @@ async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | N
     toks = set(match_tokens(clean_q))
 
     # إذا طابق نيّة محلية أو كان السؤال شخصياً يخص بيانات الطالب السائل، نعيد إجابته الخاصة مباشرة ولا نستخدم الكاش المشترك أبداً
-    if matched or _is_personal_question(toks) or not _gemini_keys():
+    if matched or _is_personal_question(toks) or (not has_personal and not _gemini_keys()):
         return base
 
     is_student = bool(ctx.get("student"))
@@ -946,7 +985,7 @@ async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | N
             return {**base, "answer": cand_ans, "needs_ticket": bool(cached.get("needs_ticket", local_ticket)),
                     "used_ai": True, "cached": True}
 
-    if not allow_ai:
+    if not allow_ai and not has_personal:
         return {**base, "blocked": True}
 
     who = "طالب في الدفعة" if is_student else "زائر"
@@ -959,6 +998,23 @@ async def ask_assistant(question: str, ctx: Mapping[str, Any], now: datetime | N
         'أعد JSON فقط: {"answer": "النص", "needs_ticket": boolean}\n'
         f"صفة السائل: {who}\n\n=== الدليل العملي الشامل للطالب ===\n{BOT_GUIDE}"
     )
+
+    # 1) Try student's own Gemini API key first (unlimited, does not consume college quota)
+    if has_personal:
+        ai_res = await _call_gemini_json(
+            sys_prompt, f"سؤال المستخدم: {clean_q}", timeout=8.0, max_tokens=1000, keys_override=[personal_key]
+        )
+        if isinstance(ai_res, dict) and isinstance(ai_res.get("answer"), str) and ai_res["answer"].strip():
+            ans_clean = ai_res["answer"].strip()[:1800]
+            value = {"answer": ans_clean, "needs_ticket": bool(ai_res.get("needs_ticket", local_ticket))}
+            if not _contains_personal_data(ans_clean):
+                await cache_put(store, key, "ask", value)
+            return {**base, **value, "used_ai": True, "counted": False, "used_personal_key": True}
+        base["personal_key_failed"] = True
+        if not allow_ai or not _gemini_keys():
+            return {**base, "blocked": not allow_ai}
+
+    # 2) Fall back to college's shared Gemini API key (counted against daily quota)
     ai_res = await _call_gemini_json(sys_prompt, f"سؤال المستخدم: {clean_q}", timeout=8.0, max_tokens=1000)
     if isinstance(ai_res, dict) and isinstance(ai_res.get("answer"), str) and ai_res["answer"].strip():
         ans_clean = ai_res["answer"].strip()[:1800]

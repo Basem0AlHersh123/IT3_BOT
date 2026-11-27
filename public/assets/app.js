@@ -187,14 +187,14 @@ const ACCENT_SWATCHES = [
 ];
 
 /* ---------- الشبكة ---------- */
-async function api(path, { method = 'GET', body, etag } = {}) {
+async function api(path, { method = 'GET', body, etag, headers: extraHeaders } = {}) {
   const maxAttempts = method === 'GET' ? 2 : 1;
   let lastErr;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 15000);
     try {
-      const headers = { Authorization: `tma ${INIT}` };
+      const headers = Object.assign({ Authorization: `tma ${INIT}` }, extraHeaders || {});
       if (body) headers['Content-Type'] = 'application/json';
       if (etag) headers['If-None-Match'] = etag;
       const r = await fetch(path, {
